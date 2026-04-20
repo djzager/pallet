@@ -4,10 +4,9 @@ A standardized platform for syncing and placing AI agent configuration — rules
 skills, profiles, and prompts — from organizational sources to developer
 workstations.
 
-Pallet fetches resources from sources (hub, git repos), stores them canonically
-in `.konveyor/`, and symlinks them to where each agent expects them (`.claude/`,
-`.cursor/`, `.goose/`, etc.) — read-only, auditable, and hierarchically
-governed.
+Pallet fetches resources from sources (hub, git repos) and writes them directly
+to where each agent expects them (`.claude/`, `.cursor/`, `.goose/`, etc.) —
+read-only, auditable, and hierarchically governed.
 
 ## The Problem
 
@@ -24,44 +23,88 @@ agent behavior across teams have no way to:
 ## How It Works
 
 ```
-Sources                     Canonical Store           Agent Placement
-(where to fetch)            (single truth)            (where agents read)
+Sources                     Agent Placement            Audit
+(where to fetch)            (where agents read)        (what was synced)
 
 hub API ─────┐
-              ├──► .konveyor/ ──────┬──► .claude/rules/     (symlink, 0444)
-git repos ───┘     ├── profiles/    ├──► .claude/skills/    (symlink, 0444)
-                   ├── skills/      ├──► .cursor/rules/     (generated, 0444)
-                   ├── rules/       ├──► .goose/skills/     (symlink, 0444)
-                   └── prompts/     └──► .opencode/rules/   (symlink, 0444)
+              ├──► merge ──► .claude/rules/     (direct write, 0444)
+git repos ───┘              .claude/skills/    (direct write, 0444)
+                            .claude/agents/    (direct write, 0444)
+                            pallet.lock        (project root)
 ```
 
 ## Quick Start
 
 ```bash
-# Authenticate to hub (determines managed vs autonomous mode)
-pallet auth login --hub https://hub.example.com
+# Authenticate to hub (saves credentials, creates pallet.yaml)
+pallet auth https://hub.example.com --user you --password pass
 
-# Add a git source for skills and rules
+# Or manually add a git source
 pallet config add-source konveyor-skills --type git \
   --url https://github.com/konveyor/skills
 
 # Sync and place for detected agents
 pallet sync .
 
-# Check what's placed and detect drift
-pallet status .
+# Deterministic reproduction from lock file
+pallet sync . --locked
 ```
 
-## Two Operating Modes
+## Configuration
 
-**Managed** — for untrusted migrators. `pallet auth login` returns a read-only
-config from the hub. The migrator can't change sources or modify synced
-resources. The hub decides what they get based on their application's archetype.
+### Project Config (`pallet.yaml`)
 
-**Autonomous** — for trusted developers. `pallet auth login` returns a
-recommended config that the developer can customize. They own their config, add
-sources, choose agents. Governed resources from higher-authority sources still
-can't be overridden.
+Lives in the project root. Committed to the repo. Defines what sources to sync.
+
+```yaml
+hub:
+  url: https://hub.example.com
+
+sources:
+  - name: org-governance
+    type: git
+    url: https://github.com/org/governance
+
+  - name: team-skills
+    type: git
+    url: https://github.com/team/skills
+    paths:
+      - skills/agent-readiness
+
+  - name: hub-profiles
+    type: hub
+
+agents:
+  auto_detect: true
+```
+
+### Credentials (`~/.pallet/credentials.yaml`)
+
+Hub token stored locally, never committed.
+
+### Lock File (`pallet.lock`)
+
+Written to the project root after each sync. Records exact source refs,
+content hashes, and placed paths. Serves as the audit trail — git history
+provides the timeline.
+
+## Layer Hierarchy
+
+Sources are ordered — first = most authoritative (org-wide), last = most specific.
+Local files in `.claude/` coexist alongside pallet-managed resources.
+
+```
+Source 0: org-governance     <- org level (most authoritative)
+Source 1: team-skills        <- team level
+Source 2: hub-profiles       <- hub (project-specific)
+Local:    .claude/rules/*    <- project-specific (your files, not managed by pallet)
+```
+
+### Governance
+
+Per-resource in frontmatter:
+- `governed` — cannot be overridden by less-authoritative sources
+- `federated` — can be overridden (default)
 
 ## Architecture
 
@@ -71,8 +114,6 @@ Pallet uses three adapter layers, each independently extensible:
 - **Resource adapters** — what to handle (profiles, skills, rules, prompts, future types)
 - **Agent adapters** — where to place (Claude, Cursor, Goose, OpenCode, Copilot)
 
-Adding support for a new source, resource type, or agent is just adding an
-adapter. The core sync pipeline doesn't change.
-
 See [docs/DESIGN.md](docs/DESIGN.md) for the full architecture.
 See [docs/USE_CASES.md](docs/USE_CASES.md) for detailed use case walkthroughs.
+See [docs/roadmap/](docs/roadmap/) for planned features.
