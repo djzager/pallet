@@ -9,8 +9,8 @@ Output demo/demo.mp4
 # Terminal appearance
 Set Shell "bash"
 Set FontSize 16
-Set Width 1000
-Set Height 650
+Set Width 1200
+Set Height 700
 Set Padding 20
 Set Theme "Catppuccin Mocha"
 Set TypingSpeed 40ms
@@ -27,61 +27,40 @@ Enter
 Sleep 300ms
 Show
 
-# --- Scene 1: Add organizational sources ---
-Type "# Add org-wide governance rules"
+# --- Scene 1: Show committed pallet.yaml ---
+Type "# Project config — two git sources, selective paths"
 Enter
 Sleep 800ms
 
-Type "pallet config add-source org-governance --type git --url $ORG_REPO"
+Type "cat pallet.yaml"
 Enter
-Sleep 1.5s
+Sleep 3s
 
-Type "# Add team-level skills and overrides"
-Enter
-Sleep 800ms
-
-Type "pallet config add-source team-skills --type git --url $TEAM_REPO"
-Enter
-Sleep 1.5s
-
-# --- Scene 2: Show config ---
-Type "pallet config show"
-Enter
-Sleep 2s
-
-# --- Scene 3: Sync resources ---
-Type "# Sync resources from all sources"
+# --- Scene 2: Sync resources from GitHub ---
+Type "# Sync agents, skills, and Rust rules"
 Enter
 Sleep 800ms
 
 Type "pallet sync ."
 Enter
+Sleep 15s
+
+# --- Scene 3: Inspect placed files ---
+Type "# Agents and skills placed for Claude Code"
+Enter
+Sleep 800ms
+
+Type "tree .claude/agents .claude/skills"
+Enter
 Sleep 3s
 
-# --- Scene 4: Inspect placed files ---
-Type "# Inspect what pallet placed for Claude Code"
+# --- Scene 4: Show a placed agent ---
+Type "# Review agents are ready to use"
 Enter
 Sleep 800ms
 
-Type "tree .claude/"
+Type "head -8 .claude/agents/00-engineering-toolkit-security-reviewer.md"
 Enter
-Sleep 2s
-
-# --- Scene 5: Show governance in action ---
-Type "# Governed rule — cannot be overridden by downstream sources"
-Enter
-Sleep 800ms
-
-Type "head -5 .claude/rules/00-org-governance-security-baseline.md"
-Enter
-Sleep 2s
-
-Type "# Team's coding-standards override the org's federated version"
-Enter
-Sleep 800ms
-
-Type "head -5 .claude/rules/01-team-skills-coding-standards.md"
-Enter
-Sleep 2s
+Sleep 3s
 
 Sleep 1s

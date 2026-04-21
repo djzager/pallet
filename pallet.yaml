@@ -1,0 +1,19 @@
+sources:
+  - name: engineering-toolkit
+    type: git
+    url: https://github.com/gwenneg/claude-engineering-toolkit
+    paths:
+      - agents
+      - skills/agent-readiness
+      - skills/full-review
+      - skills/implement
+
+  - name: rust-skills
+    type: git
+    url: https://github.com/leonardomso/rust-skills
+    ref: master
+    paths:
+      - rules
+
+agents:
+  auto_detect: true

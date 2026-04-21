@@ -51,8 +51,13 @@ pub async fn fetch(source: &SourceConfig, source_index: usize, skip_pull: bool) 
     } else {
         for path_entry in paths {
             let sub_path = path_entry.path();
-            let kind_hint = path_entry.kind_hint().cloned();
             let full_path = cache_dir.join(sub_path);
+            // Use explicit kind hint if provided, otherwise infer from directory name
+            let kind_hint = path_entry.kind_hint().cloned().or_else(|| {
+                full_path
+                    .file_name()
+                    .and_then(|n| kind_for_directory(&n.to_string_lossy()))
+            });
             if full_path.exists() {
                 discover_resources(
                     &full_path,
