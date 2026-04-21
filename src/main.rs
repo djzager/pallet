@@ -41,6 +41,9 @@ enum Commands {
         /// Reproduce exact state from lock file
         #[arg(long)]
         locked: bool,
+        /// Preview what would be placed with context impact report (no files written)
+        #[arg(long)]
+        dry_run: bool,
     },
     /// Re-sync without pulling remote sources (offline mode)
     Lock {
@@ -97,15 +100,15 @@ async fn main() -> Result<()> {
         } => {
             cmd_auth(&hub_url, &user, &password).await?;
         }
-        Commands::Sync { path, locked } => {
+        Commands::Sync { path, locked, dry_run } => {
             let workspace = path.unwrap_or_else(|| PathBuf::from("."));
             let workspace = workspace.canonicalize()?;
-            cmd_sync(&workspace, locked, false).await?;
+            cmd_sync(&workspace, locked, false, dry_run).await?;
         }
         Commands::Lock { path } => {
             let workspace = path.unwrap_or_else(|| PathBuf::from("."));
             let workspace = workspace.canonicalize()?;
-            cmd_sync(&workspace, false, true).await?;
+            cmd_sync(&workspace, false, true, false).await?;
         }
         Commands::Config { action } => {
             let workspace = PathBuf::from(".").canonicalize()?;
@@ -220,8 +223,8 @@ async fn cmd_auth(hub_url: &str, user: &str, password: &str) -> Result<()> {
     Ok(())
 }
 
-async fn cmd_sync(workspace: &std::path::Path, locked: bool, offline: bool) -> Result<()> {
-    sync::run_sync(workspace, locked, offline).await
+async fn cmd_sync(workspace: &std::path::Path, locked: bool, offline: bool, dry_run: bool) -> Result<()> {
+    sync::run_sync(workspace, locked, offline, dry_run).await
 }
 
 fn cmd_config_show(workspace: &std::path::Path) -> Result<()> {

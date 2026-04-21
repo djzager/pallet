@@ -5,7 +5,7 @@ pub mod goose;
 pub mod opencode;
 pub(crate) mod util;
 
-use crate::resource::RawResource;
+use crate::resource::{RawResource, ResourceKind};
 use anyhow::Result;
 use std::collections::HashMap;
 use std::path::Path;
@@ -17,6 +17,9 @@ pub struct PlaceResult {
     /// Paths placed relative to workspace root (e.g., ".claude/rules/00-src-name.md")
     pub placed_paths: Vec<String>,
 }
+
+/// Default context budget in bytes (~30K tokens * 4 bytes/token)
+pub const DEFAULT_CONTEXT_BUDGET_BYTES: usize = 120_000;
 
 /// Trait that every agent adapter must implement
 pub trait AgentAdapter {
@@ -34,6 +37,17 @@ pub trait AgentAdapter {
 
     /// Remove previously-placed resources tracked by the given relative paths.
     fn cleanup_placed(&self, workspace: &Path, placed_paths: &[String]) -> Result<()>;
+
+    /// Resource kinds that are always loaded into the agent's context at startup.
+    /// Used for context budget estimation.
+    fn always_loaded_kinds(&self) -> Vec<ResourceKind> {
+        vec![ResourceKind::Rule]
+    }
+
+    /// Maximum bytes of always-loaded content before warning.
+    fn context_budget_bytes(&self) -> usize {
+        DEFAULT_CONTEXT_BUDGET_BYTES
+    }
 }
 
 /// Returns all known agent adapters

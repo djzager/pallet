@@ -1,3 +1,10 @@
 /target
 demo/demo.mp4
 pallet.lock
+
+# Agent config directories (managed by pallet sync)
+.claude/
+.cursor/
+.goose/
+.opencode/
+codex.md

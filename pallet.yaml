@@ -12,8 +12,6 @@ sources:
     type: git
     url: https://github.com/leonardomso/rust-skills
     ref: master
-    paths:
-      - rules
 
 agents:
   auto_detect: true

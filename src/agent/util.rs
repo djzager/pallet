@@ -85,16 +85,19 @@ pub fn prefixed_filename(source_index: usize, source_name: &str, filename: &str)
 
 /// Extract the primary markdown content from a resource, regardless of content type.
 /// For SingleFile, returns the content directly.
-/// For Directory (skills), finds and returns the SKILL.md content.
+/// For Directory (skills), finds the primary skill marker: SKILL.md > CLAUDE.md > AGENTS.md.
 pub fn extract_primary_content(resource: &RawResource) -> Option<&[u8]> {
     match &resource.content {
         ResourceContent::SingleFile { content, .. } => Some(content),
         ResourceContent::Directory { files } => {
-            // Look for SKILL.md (case-insensitive)
-            files
-                .iter()
-                .find(|(name, _)| name.eq_ignore_ascii_case("SKILL.md"))
-                .or_else(|| files.iter().find(|(name, _)| name.ends_with(".md")))
+            // Look for skill markers in priority order
+            for marker in crate::source::git_source::SKILL_MARKERS {
+                if let Some((_, content)) = files.iter().find(|(name, _)| name.eq_ignore_ascii_case(marker)) {
+                    return Some(content.as_slice());
+                }
+            }
+            // Fallback: any .md file
+            files.iter().find(|(name, _)| name.ends_with(".md"))
                 .map(|(_, content)| content.as_slice())
         }
         ResourceContent::ProfileBundle => None,

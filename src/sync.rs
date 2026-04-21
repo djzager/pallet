@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::path::Path;
 
 /// Run the full sync pipeline: fetch -> merge -> cleanup -> place -> lock
-pub async fn run_sync(workspace: &Path, locked: bool, offline: bool) -> Result<()> {
+pub async fn run_sync(workspace: &Path, locked: bool, offline: bool, dry_run: bool) -> Result<()> {
     // 1. Load config from workspace/pallet.yaml
     let cfg = config::load_config(workspace).context(
         "Failed to load pallet.yaml. Create one with `pallet auth` or `pallet config add-source`.",
@@ -144,8 +144,60 @@ pub async fn run_sync(workspace: &Path, locked: bool, offline: bool) -> Result<(
     let all_resources = merge_result.resources;
     println!("  {} resource(s) after merge", all_resources.len());
 
-    // 6. Clean up previously-placed resources (per agent)
+    // 6. Context budget check
     let adapters = agent::all_adapters();
+    let mut budget_exceeded = false;
+    for adapter in &adapters {
+        if !adapter.detect(workspace) {
+            continue;
+        }
+        let always_loaded = adapter.always_loaded_kinds();
+        let always_loaded_bytes: usize = all_resources
+            .iter()
+            .filter(|r| always_loaded.contains(&r.kind))
+            .map(|r| r.content_size())
+            .sum();
+        let always_loaded_count = all_resources
+            .iter()
+            .filter(|r| always_loaded.contains(&r.kind))
+            .count();
+        let budget = adapter.context_budget_bytes();
+
+        if always_loaded_bytes > budget {
+            let estimated_tokens = always_loaded_bytes / 4;
+            eprintln!(
+                "\n  {} context budget exceeded: {} always-loaded resource(s), \
+                 ~{}KB (~{} tokens)",
+                adapter.display_name(),
+                always_loaded_count,
+                always_loaded_bytes / 1024,
+                estimated_tokens,
+            );
+            eprintln!(
+                "    Budget: ~{}KB (~{} tokens). Exceeds by ~{}KB.",
+                budget / 1024,
+                budget / 4,
+                (always_loaded_bytes - budget) / 1024,
+            );
+            eprintln!(
+                "    Tip: use 'place_as: skill' in paths config, or remove 'paths' to sync as a single skill."
+            );
+            budget_exceeded = true;
+        }
+    }
+    if budget_exceeded && !dry_run {
+        anyhow::bail!(
+            "Context budget exceeded for one or more agents. \
+             Run `pallet sync --dry-run` to preview, then adjust pallet.yaml."
+        );
+    }
+
+    if dry_run {
+        print_dry_run_report(&adapters, workspace, &all_resources);
+        return Ok(());
+    }
+
+    // 7. Clean up previously-placed resources (per agent)
     if let Ok(old_lock) = lock::load_lock(workspace) {
         let old_placed = lock::all_placed_paths(&old_lock);
         for adapter in &adapters {
@@ -243,4 +295,99 @@ pub async fn run_sync(workspace: &Path, locked: bool, offline: bool) -> Result<(
     }
 
     Ok(())
+}
+
+use crate::resource::ResourceKind;
+
+/// Print a dry-run context impact report for each detected agent
+fn print_dry_run_report(
+    adapters: &[Box<dyn agent::AgentAdapter>],
+    workspace: &Path,
+    resources: &[crate::resource::RawResource],
+) {
+    println!("\n--- Dry run report (no files written) ---");
+
+    for adapter in adapters {
+        if !adapter.detect(workspace) {
+            continue;
+        }
+        println!("\n  {}:", adapter.display_name());
+
+        let always_loaded = adapter.always_loaded_kinds();
+
+        // Group resources by kind
+        let mut by_kind: HashMap<String, (usize, usize)> = HashMap::new();
+        for r in resources {
+            let entry = by_kind.entry(r.kind.to_string()).or_insert((0, 0));
+            entry.0 += 1;
+            entry.1 += r.content_size();
+        }
+
+        // Always-loaded resources
+        let mut always_count = 0usize;
+        let mut always_bytes = 0usize;
+        for r in resources {
+            if always_loaded.contains(&r.kind) {
+                always_count += 1;
+                always_bytes += r.content_size();
+            }
+        }
+
+        // On-demand resources
+        let mut ondemand_count = 0usize;
+        let mut ondemand_bytes = 0usize;
+        for r in resources {
+            if !always_loaded.contains(&r.kind) {
+                match r.kind {
+                    ResourceKind::Skill | ResourceKind::Agent => {
+                        ondemand_count += 1;
+                        ondemand_bytes += r.content_size();
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        let budget = adapter.context_budget_bytes();
+        let over = always_bytes > budget;
+
+        println!(
+            "    Always-loaded: {} resource(s), ~{}KB (~{} tokens){}",
+            always_count,
+            always_bytes / 1024,
+            always_bytes / 4,
+            if over { " << OVER BUDGET" } else { "" },
+        );
+
+        // Break down by source
+        let mut by_source: HashMap<&str, (usize, usize)> = HashMap::new();
+        for r in resources {
+            if always_loaded.contains(&r.kind) {
+                let entry = by_source.entry(&r.source_name).or_insert((0, 0));
+                entry.0 += 1;
+                entry.1 += r.content_size();
+            }
+        }
+        for (source, (count, bytes)) in &by_source {
+            println!(
+                "      {}: {} resource(s), ~{}KB",
+                source, count, bytes / 1024
+            );
+        }
+
+        if ondemand_count > 0 {
+            println!(
+                "    On-demand: {} resource(s), ~{}KB (no startup cost)",
+                ondemand_count,
+                ondemand_bytes / 1024,
+            );
+        }
+
+        println!(
+            "    Budget: ~{}KB (~{} tokens)",
+            budget / 1024,
+            budget / 4,
+        );
+    }
+    println!();
 }

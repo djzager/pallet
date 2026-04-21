@@ -74,6 +74,17 @@ pub enum ResourceContent {
     ProfileBundle,
 }
 
+impl RawResource {
+    /// Total byte size of all content in this resource
+    pub fn content_size(&self) -> usize {
+        match &self.content {
+            ResourceContent::SingleFile { content, .. } => content.len(),
+            ResourceContent::Directory { files } => files.iter().map(|(_, c)| c.len()).sum(),
+            ResourceContent::ProfileBundle => 0,
+        }
+    }
+}
+
 /// Metadata parsed from YAML frontmatter
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Frontmatter {

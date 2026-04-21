@@ -49,6 +49,22 @@ pub async fn fetch(source: &SourceConfig, source_index: usize, skip_pull: bool) 
             exclude,
         )?;
     } else {
+        // Check if the repo root has a skill marker that paths: config is bypassing
+        if has_skill_marker(&cache_dir) {
+            if let Some(marker) = find_primary_skill_marker(&cache_dir) {
+                eprintln!(
+                    "  Warning: source '{}' has a root {} (designed as a single skill),",
+                    source.name, marker
+                );
+                eprintln!(
+                    "    but 'paths' config selects subdirectories which bypasses it."
+                );
+                eprintln!(
+                    "    Consider removing 'paths' to sync the repo as a single on-demand skill."
+                );
+            }
+        }
+
         for path_entry in paths {
             let sub_path = path_entry.path();
             let full_path = cache_dir.join(sub_path);
@@ -140,6 +156,21 @@ fn git_rev_parse_head(repo_dir: &Path) -> Result<String> {
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
+/// Skill marker filenames in priority order.
+/// The first one found becomes the primary content file for the skill.
+pub const SKILL_MARKERS: &[&str] = &["SKILL.md", "CLAUDE.md", "AGENTS.md"];
+
+/// Check if a directory contains any skill marker file (SKILL.md, CLAUDE.md, or AGENTS.md)
+pub fn has_skill_marker(path: &Path) -> bool {
+    SKILL_MARKERS.iter().any(|m| path.join(m).exists())
+}
+
+/// Find the primary skill marker file in a directory, resolving symlinks to avoid duplicates.
+/// Returns the marker filename (e.g. "SKILL.md") or None.
+pub fn find_primary_skill_marker(path: &Path) -> Option<&'static str> {
+    SKILL_MARKERS.iter().copied().find(|m| path.join(m).exists())
+}
+
 /// Infer a resource kind hint from a well-known directory name
 pub fn kind_for_directory(name: &str) -> Option<ResourceKind> {
     match name {
@@ -178,9 +209,8 @@ pub fn discover_resources(
         return Ok(());
     }
 
-    // Check if this directory is a skill (contains SKILL.md)
-    let skill_md = path.join("SKILL.md");
-    if skill_md.exists() {
+    // Check if this directory is a skill (contains SKILL.md, CLAUDE.md, or AGENTS.md)
+    if has_skill_marker(path) {
         let skill = read_skill_directory(path, source_name, source_index)?;
         resources.push(skill);
         return Ok(()); // Don't recurse into skill directories
@@ -219,7 +249,7 @@ pub fn discover_resources(
             && entry_path.extension().is_some_and(|e| e == "md")
             && entry_path
                 .file_name()
-                .is_some_and(|n| n != "SKILL.md" && n != "README.md")
+                .is_some_and(|n| n != "SKILL.md" && n != "CLAUDE.md" && n != "AGENTS.md" && n != "README.md")
         {
             if let Some(resource) =
                 try_parse_resource(&entry_path, source_name, source_index, kind_hint.as_ref())?
@@ -247,12 +277,9 @@ pub fn read_skill_directory(
     let mut files = Vec::new();
     read_dir_recursive(dir, dir, &mut files)?;
 
-    // Parse governance from SKILL.md frontmatter
-    let governance = dir
-        .join("SKILL.md")
-        .exists()
-        .then(|| fs::read_to_string(dir.join("SKILL.md")).ok())
-        .flatten()
+    // Parse governance from the primary skill marker's frontmatter
+    let governance = find_primary_skill_marker(dir)
+        .and_then(|marker| fs::read_to_string(dir.join(marker)).ok())
         .and_then(|content| resource::parse_frontmatter(&content))
         .map(|fm| fm.governance)
         .unwrap_or_else(|| "federated".to_string());
