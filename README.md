@@ -8,6 +8,21 @@ Pallet fetches resources from sources (hub, git repos) and writes them directly
 to where each agent expects them (`.claude/`, `.cursor/`, `.goose/`, etc.) —
 read-only, auditable, and hierarchically governed.
 
+## Demo
+
+![Pallet Demo](demo/demo.gif)
+
+<details>
+<summary>Regenerate the demo recording</summary>
+
+Requires [VHS](https://github.com/charmbracelet/vhs): `brew install vhs`
+
+```bash
+./demo/record.sh
+```
+
+</details>
+
 ## The Problem
 
 AI coding agents (Claude Code, Cursor, Goose, OpenCode, Copilot) each have

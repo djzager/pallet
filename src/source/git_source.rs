@@ -7,7 +7,7 @@ use std::path::Path;
 use std::process::Command;
 
 /// Fetch resources from a git source
-pub async fn fetch(source: &SourceConfig, source_index: usize) -> Result<FetchResult> {
+pub async fn fetch(source: &SourceConfig, source_index: usize, skip_pull: bool) -> Result<FetchResult> {
     let url = source
         .url
         .as_ref()
@@ -16,7 +16,16 @@ pub async fn fetch(source: &SourceConfig, source_index: usize) -> Result<FetchRe
 
     // Clone or update cache
     let cache_dir = config::cache_dir()?.join(&source.name);
-    clone_or_pull(&cache_dir, url, git_ref)?;
+    if skip_pull {
+        if !cache_dir.join(".git").exists() {
+            anyhow::bail!(
+                "No cached repo for '{}'. Run `pallet sync` first.",
+                source.name
+            );
+        }
+    } else {
+        clone_or_pull(&cache_dir, url, git_ref)?;
+    }
 
     // Capture resolved commit SHA
     let resolved_ref = git_rev_parse_head(&cache_dir).ok();
@@ -127,7 +136,7 @@ fn git_rev_parse_head(repo_dir: &Path) -> Result<String> {
 }
 
 /// Infer a resource kind hint from a well-known directory name
-fn kind_for_directory(name: &str) -> Option<ResourceKind> {
+pub fn kind_for_directory(name: &str) -> Option<ResourceKind> {
     match name {
         "skills" => Some(ResourceKind::Skill),
         "rules" => Some(ResourceKind::Rule),
@@ -138,12 +147,12 @@ fn kind_for_directory(name: &str) -> Option<ResourceKind> {
 }
 
 /// Check if a path component matches any exclude pattern
-fn is_excluded(name: &str, exclude: &[String]) -> bool {
+pub fn is_excluded(name: &str, exclude: &[String]) -> bool {
     exclude.iter().any(|e| e == name)
 }
 
 /// Recursively discover resources under a path
-fn discover_resources(
+pub fn discover_resources(
     path: &Path,
     repo_root: &Path,
     source_name: &str,
@@ -219,7 +228,7 @@ fn discover_resources(
 }
 
 /// Read a skill directory (SKILL.md + supporting files)
-fn read_skill_directory(
+pub fn read_skill_directory(
     dir: &Path,
     source_name: &str,
     source_index: usize,
@@ -253,7 +262,7 @@ fn read_skill_directory(
     })
 }
 
-fn read_dir_recursive(
+pub fn read_dir_recursive(
     base: &Path,
     current: &Path,
     files: &mut Vec<(String, Vec<u8>)>,
@@ -280,7 +289,7 @@ fn read_dir_recursive(
 
 /// Try to parse a markdown file as a resource.
 /// Returns None (with a warning) if no kind can be determined.
-fn try_parse_resource(
+pub fn try_parse_resource(
     path: &Path,
     source_name: &str,
     source_index: usize,

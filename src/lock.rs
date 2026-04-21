@@ -1,3 +1,4 @@
+use crate::agent::PlaceResult;
 use crate::config::SourceConfig;
 use crate::resource::RawResource;
 use anyhow::{Context, Result};
@@ -10,8 +11,6 @@ use serde::{Deserialize, Serialize};
 pub struct LockFile {
     /// Hash of the config file content that produced this lock
     pub config_hash: String,
-    /// Timestamp of lock generation
-    pub locked_at: String,
     /// Resolved source references
     pub sources: Vec<LockedSource>,
     /// Per-resource manifest
@@ -38,17 +37,16 @@ pub struct LockedResource {
     pub source_index: usize,
     pub governance: String,
     pub content_hash: String,
-    /// Paths placed by pallet (relative to workspace root)
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub placed_paths: Vec<String>,
+    /// Paths placed per agent, keyed by agent name
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub placed: HashMap<String, Vec<String>>,
 }
 
 /// Build a lock file from sync results
 pub fn build_lock(
     fetch_results: &[(&SourceConfig, Option<String>)],
     resources: &[RawResource],
-    hashes: &HashMap<String, String>,
-    placed_paths: &[String],
+    agent_results: &HashMap<String, PlaceResult>,
     config_hash: &str,
 ) -> LockFile {
     let sources = fetch_results
@@ -61,23 +59,31 @@ pub fn build_lock(
         })
         .collect();
 
-    let locked_resources = resources
+    let mut locked_resources: Vec<LockedResource> = resources
         .iter()
         .map(|r| {
-            // Find the best matching hash for this resource
+            // Find the best matching hash for this resource across all agents
             let kind_dir = r.kind.dir_name();
-            let content_hash = hashes
-                .iter()
+            let content_hash = agent_results
+                .values()
+                .flat_map(|pr| pr.hashes.iter())
                 .find(|(k, _)| k.starts_with(&format!("{}/{}", kind_dir, r.name)))
                 .map(|(_, v)| v.clone())
                 .unwrap_or_default();
 
-            // Find placed paths for this resource
-            let resource_placed: Vec<String> = placed_paths
-                .iter()
-                .filter(|p| p.contains(&r.name))
-                .cloned()
-                .collect();
+            // Find placed paths per agent for this resource
+            let mut placed: HashMap<String, Vec<String>> = HashMap::new();
+            for (agent_name, pr) in agent_results {
+                let resource_placed: Vec<String> = pr
+                    .placed_paths
+                    .iter()
+                    .filter(|p| p.contains(&r.name))
+                    .cloned()
+                    .collect();
+                if !resource_placed.is_empty() {
+                    placed.insert(agent_name.clone(), resource_placed);
+                }
+            }
 
             LockedResource {
                 kind: r.kind.to_string(),
@@ -86,14 +92,16 @@ pub fn build_lock(
                 source_index: r.source_index,
                 governance: r.governance.clone(),
                 content_hash,
-                placed_paths: resource_placed,
+                placed,
             }
         })
         .collect();
 
+    // Sort resources deterministically by (kind, name) for merge-friendly diffs
+    locked_resources.sort_by(|a, b| (&a.kind, &a.name).cmp(&(&b.kind, &b.name)));
+
     LockFile {
         config_hash: config_hash.to_string(),
-        locked_at: chrono::Utc::now().to_rfc3339(),
         sources,
         resources: locked_resources,
     }
@@ -118,12 +126,18 @@ pub fn load_lock(workspace: &Path) -> Result<LockFile> {
     Ok(lock)
 }
 
-/// Collect all placed paths from a lock file
-pub fn all_placed_paths(lock: &LockFile) -> Vec<String> {
-    lock.resources
-        .iter()
-        .flat_map(|r| r.placed_paths.iter().cloned())
-        .collect()
+/// Collect all placed paths from a lock file, keyed by agent name
+pub fn all_placed_paths(lock: &LockFile) -> HashMap<String, Vec<String>> {
+    let mut result: HashMap<String, Vec<String>> = HashMap::new();
+    for r in &lock.resources {
+        for (agent, paths) in &r.placed {
+            result
+                .entry(agent.clone())
+                .or_default()
+                .extend(paths.iter().cloned());
+        }
+    }
+    result
 }
 
 #[cfg(test)]
@@ -132,9 +146,14 @@ mod tests {
 
     #[test]
     fn test_lock_file_roundtrip() {
+        let mut placed = HashMap::new();
+        placed.insert(
+            "claude".to_string(),
+            vec![".claude/rules/00-test-source-test-rule.md".to_string()],
+        );
+
         let lock = LockFile {
             config_hash: "sha256:abc123".to_string(),
-            locked_at: "2026-04-20T15:00:00Z".to_string(),
             sources: vec![LockedSource {
                 name: "test-source".to_string(),
                 source_type: "git".to_string(),
@@ -148,7 +167,7 @@ mod tests {
                 source_index: 0,
                 governance: "federated".to_string(),
                 content_hash: "sha256:deadbeef".to_string(),
-                placed_paths: vec![".claude/rules/00-test-source-test-rule.md".to_string()],
+                placed,
             }],
         };
 
@@ -160,9 +179,10 @@ mod tests {
         assert_eq!(parsed.sources[0].name, "test-source");
         assert_eq!(parsed.resources.len(), 1);
         assert_eq!(parsed.resources[0].name, "test-rule");
-        assert_eq!(parsed.resources[0].placed_paths.len(), 1);
+        let claude_paths = parsed.resources[0].placed.get("claude").unwrap();
+        assert_eq!(claude_paths.len(), 1);
         assert_eq!(
-            parsed.resources[0].placed_paths[0],
+            claude_paths[0],
             ".claude/rules/00-test-source-test-rule.md"
         );
     }

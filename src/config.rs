@@ -76,6 +76,7 @@ impl PathEntry {
 pub enum SourceType {
     Git,
     Hub,
+    Local,
 }
 
 impl SourceConfig {
@@ -83,6 +84,7 @@ impl SourceConfig {
         match self.source_type {
             SourceType::Git => "git",
             SourceType::Hub => "hub",
+            SourceType::Local => "local",
         }
     }
 }

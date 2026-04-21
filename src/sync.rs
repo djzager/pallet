@@ -1,9 +1,10 @@
 use crate::{agent, config, lock, merge, source, store};
 use anyhow::{Context, Result};
+use std::collections::HashMap;
 use std::path::Path;
 
-/// Run the full sync pipeline: fetch → merge → cleanup → place → lock
-pub async fn run_sync(workspace: &Path, locked: bool) -> Result<()> {
+/// Run the full sync pipeline: fetch -> merge -> cleanup -> place -> lock
+pub async fn run_sync(workspace: &Path, locked: bool, offline: bool) -> Result<()> {
     // 1. Load config from workspace/pallet.yaml
     let cfg = config::load_config(workspace).context(
         "Failed to load pallet.yaml. Create one with `pallet auth` or `pallet config add-source`.",
@@ -49,7 +50,7 @@ pub async fn run_sync(workspace: &Path, locked: bool) -> Result<()> {
                  Run `pallet sync` without --locked to update the lock file."
             );
         }
-        println!("Lock file verified (locked at: {})", lf.locked_at);
+        println!("Lock file verified (config hash matches)");
         Some(lf)
     } else {
         None
@@ -61,6 +62,16 @@ pub async fn run_sync(workspace: &Path, locked: bool) -> Result<()> {
     let mut fetch_results: Vec<(&config::SourceConfig, Option<String>)> = Vec::new();
 
     for source_cfg in cfg.sources.iter() {
+        // In offline mode, skip hub sources (no local cache)
+        if offline && source_cfg.source_type == config::SourceType::Hub {
+            println!(
+                "\nSkipping source: {} (hub, offline mode)",
+                source_cfg.name
+            );
+            fetch_results.push((source_cfg, None));
+            continue;
+        }
+
         println!(
             "\nFetching source: {} ({})",
             source_cfg.name,
@@ -82,6 +93,7 @@ pub async fn run_sync(workspace: &Path, locked: bool) -> Result<()> {
             cfg.sources.iter().position(|s| s.name == source_cfg.name).unwrap_or(0),
             hub_url.as_deref(),
             hub_token.as_deref(),
+            offline,
         )
         .await
         {
@@ -132,30 +144,42 @@ pub async fn run_sync(workspace: &Path, locked: bool) -> Result<()> {
     let all_resources = merge_result.resources;
     println!("  {} resource(s) after merge", all_resources.len());
 
-    // 6. Clean up previously-placed resources
+    // 6. Clean up previously-placed resources (per agent)
+    let adapters = agent::all_adapters();
     if let Ok(old_lock) = lock::load_lock(workspace) {
-        let old_paths = lock::all_placed_paths(&old_lock);
-        if !old_paths.is_empty() {
-            println!("\nCleaning up {} previously-placed resource(s)...", old_paths.len());
-            agent::claude::cleanup_placed(workspace, &old_paths)?;
+        let old_placed = lock::all_placed_paths(&old_lock);
+        for adapter in &adapters {
+            if let Some(paths) = old_placed.get(adapter.name()) {
+                if !paths.is_empty() {
+                    println!(
+                        "\nCleaning up {} previously-placed path(s) for {}...",
+                        paths.len(),
+                        adapter.display_name()
+                    );
+                    adapter.cleanup_placed(workspace, paths)?;
+                }
+            }
         }
     }
 
-    // 7. Detect agents and place resources directly
+    // 7. Detect agents and place resources
     println!("\nPlacing resources...");
-    let mut agents = Vec::new();
-    let place_result = if agent::claude::detect(workspace) {
-        println!("  Detected agent: Claude Code");
-        let result = agent::claude::place(workspace, &all_resources)?;
-        agents.push("claude".to_string());
-        result
-    } else {
-        println!("  No agents detected — resources not placed");
-        agent::claude::PlaceResult {
-            hashes: std::collections::HashMap::new(),
-            placed_paths: Vec::new(),
+    let mut agent_results: HashMap<String, agent::PlaceResult> = HashMap::new();
+    let mut detected_agents: Vec<String> = Vec::new();
+
+    for adapter in &adapters {
+        if adapter.detect(workspace) {
+            println!("  Detected agent: {}", adapter.display_name());
+            let result = adapter.place(workspace, &all_resources)?;
+            println!("    Placed {} path(s)", result.placed_paths.len());
+            detected_agents.push(adapter.name().to_string());
+            agent_results.insert(adapter.name().to_string(), result);
         }
-    };
+    }
+
+    if detected_agents.is_empty() {
+        println!("  No agents detected — resources not placed");
+    }
 
     // 8. Verify hashes in locked mode
     if let Some(ref lf) = lock_file {
@@ -165,9 +189,9 @@ pub async fn run_sync(workspace: &Path, locked: bool) -> Result<()> {
                 continue;
             }
             let prefix = format!("{}/", locked_res.kind);
-            let actual = place_result
-                .hashes
-                .iter()
+            let actual = agent_results
+                .values()
+                .flat_map(|pr| pr.hashes.iter())
                 .find(|(k, _)| k.starts_with(&prefix) && k.contains(&locked_res.name));
             if let Some((_, actual_hash)) = actual {
                 if *actual_hash != locked_res.content_hash {
@@ -197,8 +221,7 @@ pub async fn run_sync(workspace: &Path, locked: bool) -> Result<()> {
         let lock = lock::build_lock(
             &fetch_results,
             &all_resources,
-            &place_result.hashes,
-            &place_result.placed_paths,
+            &agent_results,
             &config_hash,
         );
         lock::save_lock(workspace, &lock)?;
@@ -208,16 +231,15 @@ pub async fn run_sync(workspace: &Path, locked: bool) -> Result<()> {
     // Summary
     println!("\nSync complete:");
     println!("  Sources: {}", source_names.join(", "));
-    let mut resource_counts: std::collections::HashMap<String, usize> =
-        std::collections::HashMap::new();
+    let mut resource_counts: HashMap<String, usize> = HashMap::new();
     for r in &all_resources {
         *resource_counts.entry(r.kind.to_string()).or_insert(0) += 1;
     }
     for (kind, count) in &resource_counts {
         println!("  {kind}s: {count}");
     }
-    if !agents.is_empty() {
-        println!("  Agents: {}", agents.join(", "));
+    if !detected_agents.is_empty() {
+        println!("  Agents: {}", detected_agents.join(", "));
     }
 
     Ok(())

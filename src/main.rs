@@ -42,6 +42,11 @@ enum Commands {
         #[arg(long)]
         locked: bool,
     },
+    /// Re-sync without pulling remote sources (offline mode)
+    Lock {
+        /// Workspace path (defaults to current directory)
+        path: Option<PathBuf>,
+    },
     /// Manage configuration
     Config {
         #[command(subcommand)]
@@ -95,7 +100,12 @@ async fn main() -> Result<()> {
         Commands::Sync { path, locked } => {
             let workspace = path.unwrap_or_else(|| PathBuf::from("."));
             let workspace = workspace.canonicalize()?;
-            cmd_sync(&workspace, locked).await?;
+            cmd_sync(&workspace, locked, false).await?;
+        }
+        Commands::Lock { path } => {
+            let workspace = path.unwrap_or_else(|| PathBuf::from("."));
+            let workspace = workspace.canonicalize()?;
+            cmd_sync(&workspace, false, true).await?;
         }
         Commands::Config { action } => {
             let workspace = PathBuf::from(".").canonicalize()?;
@@ -196,14 +206,22 @@ async fn cmd_auth(hub_url: &str, user: &str, password: &str) -> Result<()> {
             config::SourceType::Hub => {
                 println!("  - {} (hub profile sync)", s.name);
             }
+            config::SourceType::Local => {
+                print!("  - {} (local", s.name);
+                if let Some(paths) = &s.paths {
+                    let path_strs: Vec<&str> = paths.iter().map(|p| p.path()).collect();
+                    print!(": {}", path_strs.join(", "));
+                }
+                println!(")");
+            }
         }
     }
 
     Ok(())
 }
 
-async fn cmd_sync(workspace: &std::path::Path, locked: bool) -> Result<()> {
-    sync::run_sync(workspace, locked).await
+async fn cmd_sync(workspace: &std::path::Path, locked: bool, offline: bool) -> Result<()> {
+    sync::run_sync(workspace, locked, offline).await
 }
 
 fn cmd_config_show(workspace: &std::path::Path) -> Result<()> {
@@ -257,7 +275,8 @@ fn cmd_config_add_source(
     let source_type = match type_str.as_str() {
         "git" => config::SourceType::Git,
         "hub" => config::SourceType::Hub,
-        _ => bail!("Unknown source type '{}'. Must be 'git' or 'hub'.", type_str),
+        "local" => config::SourceType::Local,
+        _ => bail!("Unknown source type '{}'. Must be 'git', 'hub', or 'local'.", type_str),
     };
 
     if source_type == config::SourceType::Git && url.is_none() {
