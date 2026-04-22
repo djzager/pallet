@@ -75,6 +75,8 @@ mod tests {
                 filename: format!("{name}.md"),
                 content: Vec::new(),
             },
+            globs: None,
+            description: None,
         }
     }
 

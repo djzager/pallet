@@ -23,11 +23,14 @@ impl AgentAdapter for CursorAdapter {
     }
 
     fn place(&self, workspace: &Path, resources: &[RawResource]) -> Result<PlaceResult> {
-        let rules_dir = workspace.join(".cursor").join("rules");
+        let cursor_dir = workspace.join(".cursor");
+        let rules_dir = cursor_dir.join("rules");
+        let skills_dir = cursor_dir.join("skills");
         fs::create_dir_all(&rules_dir)?;
+        fs::create_dir_all(&skills_dir)?;
 
-        // Place built-in pallet skill as a rule
-        place_builtin_rule(&rules_dir)?;
+        // Place built-in pallet skill
+        util::place_builtin_skill(&skills_dir, ".cursor")?;
 
         let mut hashes = HashMap::new();
         let mut placed_paths = Vec::new();
@@ -43,9 +46,11 @@ impl AgentAdapter for CursorAdapter {
                     )?;
                 }
                 ResourceKind::Skill => {
-                    place_skill_as_mdc(
-                        &rules_dir,
+                    // Agent Skills directories in .cursor/skills/
+                    util::place_skill_directory(
+                        &skills_dir,
                         resource,
+                        ".cursor",
                         &mut hashes,
                         &mut placed_paths,
                     )?;
@@ -66,9 +71,20 @@ impl AgentAdapter for CursorAdapter {
         }
         Ok(())
     }
+
+    fn always_loaded_kinds(&self) -> Vec<ResourceKind> {
+        vec![ResourceKind::Rule, ResourceKind::Agent]
+    }
+
+    fn is_always_loaded(&self, resource: &RawResource) -> bool {
+        if resource.globs.is_some() || resource.description.is_some() {
+            return false; // Conditional — Cursor loads based on globs/description
+        }
+        self.always_loaded_kinds().contains(&resource.kind)
+    }
 }
 
-/// Place a single-file resource as a .mdc file in .cursor/rules/
+/// Place a single-file resource as a .mdc file in .cursor/rules/ with proper frontmatter
 fn place_mdc_file(
     rules_dir: &Path,
     resource: &RawResource,
@@ -90,9 +106,33 @@ fn place_mdc_file(
     let file_path = rules_dir.join(&placed_name);
 
     if let ResourceContent::SingleFile { content, .. } = &resource.content {
-        util::write_readonly(&file_path, content)?;
+        let text = String::from_utf8_lossy(content);
+        let body = util::strip_frontmatter(&text);
 
-        let hash = store::sha256_hex(content);
+        // Generate .mdc frontmatter based on conditional loading metadata
+        let frontmatter = if let Some(ref globs) = resource.globs {
+            let globs_yaml: Vec<String> = globs.iter().map(|g| format!("  - \"{}\"", g)).collect();
+            let desc = resource.description.as_deref().unwrap_or(&resource.name);
+            format!(
+                "---\nalwaysApply: false\ndescription: \"{}\"\nglobs:\n{}\n---",
+                desc,
+                globs_yaml.join("\n")
+            )
+        } else if let Some(ref desc) = resource.description {
+            format!(
+                "---\nalwaysApply: false\ndescription: \"{}\"\n---",
+                desc
+            )
+        } else {
+            "---\nalwaysApply: true\n---".to_string()
+        };
+
+        let mdc_content = format!("{}\n\n{}", frontmatter, body.trim());
+        let output = mdc_content.as_bytes();
+
+        util::write_readonly(&file_path, output)?;
+
+        let hash = store::sha256_hex(output);
         hashes.insert(format!("rules/{}", placed_name), hash);
     }
 
@@ -100,43 +140,5 @@ fn place_mdc_file(
     println!("    {} '{}': {}", resource.kind, resource.name, placed);
     placed_paths.push(placed);
 
-    Ok(())
-}
-
-/// Place a skill (Directory resource) as a single .mdc file, extracting SKILL.md content
-fn place_skill_as_mdc(
-    rules_dir: &Path,
-    resource: &RawResource,
-    hashes: &mut HashMap<String, String>,
-    placed_paths: &mut Vec<String>,
-) -> Result<()> {
-    let content = match util::extract_primary_content(resource) {
-        Some(c) => c,
-        None => return Ok(()),
-    };
-
-    let placed_name = format!(
-        "{}.mdc",
-        util::prefixed_filename(resource.source_index, &resource.source_name, &resource.name)
-    );
-    let file_path = rules_dir.join(&placed_name);
-
-    util::write_readonly(&file_path, content)?;
-
-    let hash = store::sha256_hex(content);
-    hashes.insert(format!("rules/{}", placed_name), hash);
-
-    let placed = format!(".cursor/rules/{}", placed_name);
-    println!("    Skill '{}': {}", resource.name, placed);
-    placed_paths.push(placed);
-
-    Ok(())
-}
-
-/// Place the built-in pallet skill as a .mdc rule
-fn place_builtin_rule(rules_dir: &Path) -> Result<()> {
-    let file_path = rules_dir.join("pallet.mdc");
-    util::write_readonly(&file_path, crate::builtin::PALLET_SKILL.as_bytes())?;
-    println!("    Built-in skill 'pallet': .cursor/rules/pallet.mdc");
     Ok(())
 }

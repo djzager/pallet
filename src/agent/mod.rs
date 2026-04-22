@@ -44,6 +44,13 @@ pub trait AgentAdapter {
         vec![ResourceKind::Rule]
     }
 
+    /// Whether a specific resource is always loaded (counts toward budget).
+    /// Default: true if resource kind is in always_loaded_kinds().
+    /// Claude/Cursor override: false if resource has globs or description (conditional loading).
+    fn is_always_loaded(&self, resource: &RawResource) -> bool {
+        self.always_loaded_kinds().contains(&resource.kind)
+    }
+
     /// Maximum bytes of always-loaded content before warning.
     fn context_budget_bytes(&self) -> usize {
         DEFAULT_CONTEXT_BUDGET_BYTES

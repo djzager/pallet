@@ -38,11 +38,18 @@ governance: governed
 * All dependencies must come from approved registries
 ```
 
-The `governance` field controls override behavior:
-- `governed` — cannot be overridden by lower-priority sources
-- `federated` — can be overridden by lower-priority sources (default)
+Optional frontmatter fields:
 
-Resources without explicit governance metadata default to `federated`.
+| Field | Effect |
+|-------|--------|
+| `governance` | `governed` (cannot be overridden) or `federated` (can be overridden, default) |
+| `globs` | File patterns for conditional loading (e.g., `["*.rs"]`) |
+| `paths` | Claude-native alias for `globs` |
+| `description` | Human-readable description (used by Cursor for relevance matching) |
+
+Resources without explicit governance default to `federated`. Resources with
+`globs` or `description` are conditionally loaded — they don't count toward the
+agent's context budget.
 
 ### Sources
 
@@ -53,6 +60,7 @@ through source adapters:
 |------|---------------|----------|
 | `hub` | Hub API (archetype -> profile bundle) | Managed analysis profiles |
 | `git` | Clone/pull a repo | Governance repos with rules/skills |
+| `local` | Read from a local directory | Local resources outside the project |
 
 Sources are listed in `pallet.yaml` in the project root. Their order defines
 the hierarchy (first = most general/authoritative, last = most specific).
@@ -63,11 +71,19 @@ An agent is an AI coding tool that reads configuration from a specific location
 in a specific format. Pallet detects which agents are present and places
 resources directly where each expects them.
 
-| Agent | Detection | Placement |
-|-------|-----------|-----------|
-| Claude Code | `.claude/` dir or `claude` in PATH | Direct write to `.claude/rules/`, `.claude/skills/`, `.claude/agents/` |
-| Cursor | `.cursor/` dir | Generate `.cursor/rules/*.mdc` (future) |
-| Goose | `.goose/` dir or `goose` in PATH | Direct write to `.goose/skills/` (future) |
+| Agent | Detection | Rules | Skills | Agents |
+|-------|-----------|-------|--------|--------|
+| Claude Code | `.claude/` dir or `claude` in PATH | `.claude/rules/*.md` (preserves frontmatter) | `.claude/skills/*/` (Agent Skills) | `.claude/agents/*.md` |
+| Cursor | `.cursor/` dir or `cursor` in PATH | `.cursor/rules/*.mdc` (with `alwaysApply`/`globs` frontmatter) | `.cursor/skills/*/` (Agent Skills) | `.cursor/rules/*.mdc` |
+| Goose | `.goose/` dir or `goose` in PATH | `.goose/memories/*.md` (plain markdown) | `.goose/skills/*/` (Agent Skills) | `.goose/memories/*.md` |
+| OpenCode | `.opencode/` dir or `opencode` in PATH | `.opencode/memories/*.md` (plain markdown) | `.opencode/skills/*/` (Agent Skills) | `.opencode/memories/*.md` |
+| Codex | `.codex/` dir or `codex` in PATH | `.codex/memories/*.md` (plain markdown) | `.codex/skills/*/` (Agent Skills) | `.codex/agents/*.md` |
+
+Each adapter translates pallet's canonical resource format into the agent's
+native format. For example, a rule with `globs: ["*.rs"]` becomes a `paths:`
+frontmatter entry for Claude and an `alwaysApply: false` + `globs:` entry for
+Cursor's `.mdc` format. Agents without conditional loading (Goose, OpenCode,
+Codex) receive plain markdown with frontmatter stripped.
 
 ## Architecture
 
@@ -77,11 +93,11 @@ resources directly where each expects them.
 Source Adapters           Resource Adapters          Agent Adapters
 (where to fetch)          (what to handle)           (where to place)
 
-hub  ──┐                  profile ──┐                claude  ──┐
-git  ──┼──► fetch ──►     skill   ──┼──► merge ──►   cursor  ──┼──► write directly
-       │                  rule    ──┤                 goose   ──┤    to agent dirs
-       │                  agent   ──┤                           │    (0444)
-       │                  prompt  ──┘                           │
+hub   ──┐                 profile ──┐                claude   ──┐
+git   ──┼──► fetch ──►    skill   ──┼──► merge ──►   cursor   ──┤
+local ──┘                 rule    ──┤                 goose    ──┼──► write directly
+                          agent   ──┤                 opencode ──┤    to agent dirs
+                          prompt  ──┘                 codex    ──┘    (0444)
 ```
 
 Each layer is independently extensible. Adding a new source type, resource
@@ -98,32 +114,43 @@ type, or agent is just adding an adapter. The core sync pipeline doesn't change.
 
 2. Collect facts
    Read git remote from workspace
-   Detect installed agents
 
 3. Fetch from sources (in order)
    For each source in config.sources:
      Source adapter fetches resources
+   In --locked mode: verify config hash matches lock file
 
 4. Merge with hierarchy
    For each resource name across all sources:
      If first (highest authority) occurrence is governed -> use it, skip lower
      If first occurrence is federated -> use the last (most specific) occurrence
 
-5. Clean up previous placements
+5. Context budget check
+   For each detected agent:
+     Sum always-loaded resources (rules, agents — excluding conditional)
+     If over budget (~120KB / ~30K tokens):
+       --dry-run: report only
+       --force: warn and continue
+       default: fail with guidance
+
+6. Clean up previous placements
    Read pallet.lock from project root (if exists)
    Remove previously-placed files/directories
 
-6. Place for agents
+7. Place for agents
    For each detected agent:
-     Write resources directly to agent directories
-     Set permissions to 0444
+     Translate resources to agent-native format
+     Write to agent directories (0444)
      Track placed paths and content hashes
 
-7. Write lock file
+8. Write lock file
    Write pallet.lock to project root with:
      - Config hash, timestamp
      - Source resolved refs (git SHAs)
      - Per-resource hashes and placed paths
+
+9. Context impact report
+   Print per-agent breakdown of always-loaded vs on-demand resources
 ```
 
 ## Configuration
@@ -145,6 +172,12 @@ sources:
   - name: team-skills
     type: git
     url: https://github.com/team/skills
+    paths:
+      - skills/agent-readiness
+      - path: rules/rust-conventions.md
+        kind: rule
+        globs: ["*.rs", "src/**/*.rs"]        # conditional loading
+        description: "Rust coding conventions"
 
   - name: hub-profiles
     type: hub
@@ -152,6 +185,19 @@ sources:
 agents:
   auto_detect: true
 ```
+
+Path entries support two forms:
+
+- **Simple**: `"skills/agent-readiness"` — just a path, kind inferred from directory name
+- **Annotated**: `{ path, kind, globs, description }` — explicit kind and conditional loading metadata
+
+When `globs` or `description` are set, the resource is treated as conditionally
+loaded (not counted toward context budget). Each agent adapter translates these
+to its native format:
+
+- **Claude Code**: `globs` becomes `paths:` frontmatter
+- **Cursor**: `globs` becomes `alwaysApply: false` + `globs:` in `.mdc` frontmatter
+- **Goose/OpenCode/Codex**: no conditional loading mechanism — metadata is ignored
 
 ### Credentials (`~/.pallet/credentials.yaml`)
 
@@ -234,6 +280,38 @@ The lock file serves as:
 
 Git history of `pallet.lock` provides the full audit timeline.
 
+## Context Budget
+
+Each agent has a context budget (~120KB / ~30K tokens by default) representing
+the maximum always-loaded content before performance degrades. Pallet estimates
+context impact per agent and fails the sync if the budget is exceeded.
+
+Resources are categorized as:
+
+- **Always-loaded**: rules and agent definitions — loaded into context at every
+  turn. These count toward the budget.
+- **On-demand**: skills (Agent Skills format) — only the name and description
+  are loaded at startup (~100 tokens each). Full content is loaded when the
+  agent activates the skill.
+- **Conditional**: rules with `globs` or `description` — loaded only when the
+  agent is working on matching files. Not counted toward the budget.
+
+The post-sync context impact report shows per-agent breakdown:
+
+```
+--- Context impact ---
+
+  Claude Code:
+    Always-loaded: 3 resource(s), ~12KB (~3000 tokens)
+      org-governance: 2 resource(s), ~8KB
+      team-skills: 1 resource(s), ~4KB
+    On-demand: 5 resource(s), ~45KB (no startup cost)
+    Budget: ~117KB (~29250 tokens)
+```
+
+Use `--dry-run` to preview without writing files, or `--force` to override
+budget failures.
+
 ## Numeric Prefixing for Order
 
 For agents that load all files from a directory (Claude Code's `.claude/rules/`),
@@ -249,9 +327,11 @@ files are prefixed with numbers to enforce hierarchy order:
 
 ## Built-in Pallet Skill
 
-Pallet embeds a self-awareness skill that is always placed at
-`.claude/skills/pallet/SKILL.md`. This teaches the agent about pallet commands,
-resource locations, and the governance model.
+Pallet embeds a self-awareness skill that is placed as an
+[Agent Skill](https://agentskills.io) in each detected agent's skills directory
+(e.g., `.claude/skills/pallet/SKILL.md`, `.cursor/skills/pallet/SKILL.md`).
+This teaches the agent about pallet commands, resource locations, and the
+governance model.
 
 ## CLI Commands
 
@@ -262,6 +342,9 @@ pallet config add-source NAME --type TYPE --url URL  Add a source
 pallet config remove-source NAME                     Remove a source
 pallet sync [PATH]                                   Fetch, merge, place, write lock
 pallet sync --locked [PATH]                          Reproduce exact state from lock file
+pallet sync --dry-run [PATH]                         Preview placement with context impact report
+pallet sync --force [PATH]                           Continue even if context budget exceeded
+pallet lock [PATH]                                   Re-sync from cache without pulling remotes
 ```
 
 ## Prior Art
@@ -273,3 +356,6 @@ pallet sync --locked [PATH]                          Reproduce exact state from 
 | **Terraform** | Provider adapter pattern |
 | **EditorConfig** | Hierarchical file-based config with layered overrides |
 | **chezmoi/GNU Stow** | File placement from a canonical store |
+| **rulesync** | Per-agent format translation (`.mdc`, plain markdown, etc.) |
+| **AGENTS.md** | Open standard for project instructions (Linux Foundation) |
+| **Agent Skills** | On-demand skill loading via SKILL.md (agentskills.io) |

@@ -24,71 +24,51 @@ impl AgentAdapter for CodexAdapter {
 
     fn place(&self, workspace: &Path, resources: &[RawResource]) -> Result<PlaceResult> {
         let codex_dir = workspace.join(".codex");
+        let memories_dir = codex_dir.join("memories");
+        let skills_dir = codex_dir.join("skills");
+        let agents_dir = codex_dir.join("agents");
+        fs::create_dir_all(&memories_dir)?;
+        fs::create_dir_all(&skills_dir)?;
+        fs::create_dir_all(&agents_dir)?;
+
+        // Place built-in pallet skill
+        util::place_builtin_skill(&skills_dir, ".codex")?;
 
         let mut hashes = HashMap::new();
         let mut placed_paths = Vec::new();
 
-        // Separate agent resources (individual files) from rules/skills (concatenated)
-        let mut concat_resources = Vec::new();
-        let mut agent_resources = Vec::new();
-
         for resource in resources {
             match resource.kind {
-                ResourceKind::Rule | ResourceKind::Skill => {
-                    concat_resources.push(resource);
+                ResourceKind::Rule => {
+                    // Individual plain markdown files in .codex/memories/
+                    util::place_rule_as_plain_md(
+                        &memories_dir,
+                        resource,
+                        ".codex/memories",
+                        &mut hashes,
+                        &mut placed_paths,
+                    )?;
                 }
                 ResourceKind::Agent => {
-                    agent_resources.push(resource);
+                    // Agent definitions as individual files in .codex/agents/
+                    place_agent_file(
+                        &agents_dir,
+                        resource,
+                        &mut hashes,
+                        &mut placed_paths,
+                    )?;
+                }
+                ResourceKind::Skill => {
+                    // Agent Skills directories in .codex/skills/
+                    util::place_skill_directory(
+                        &skills_dir,
+                        resource,
+                        ".codex",
+                        &mut hashes,
+                        &mut placed_paths,
+                    )?;
                 }
                 ResourceKind::Prompt | ResourceKind::Profile => {}
-            }
-        }
-
-        // Place concatenated instructions as codex.md at workspace root
-        if !concat_resources.is_empty() || !agent_resources.is_empty() {
-            let (content, concat_hashes) = util::build_concatenated_instructions(
-                // Pass all resources — build_concatenated_instructions skips prompts/profiles
-                resources,
-                crate::builtin::PALLET_SKILL,
-            );
-
-            let codex_md_path = workspace.join("codex.md");
-            util::write_readonly(&codex_md_path, &content)?;
-            hashes.extend(concat_hashes);
-
-            let placed = "codex.md".to_string();
-            println!("    Concatenated instructions: {}", placed);
-            placed_paths.push(placed);
-        }
-
-        // Place agent resources as individual files in .codex/agents/
-        if !agent_resources.is_empty() {
-            let agents_dir = codex_dir.join("agents");
-            fs::create_dir_all(&agents_dir)?;
-
-            for resource in &agent_resources {
-                let filename = match &resource.content {
-                    ResourceContent::SingleFile { filename, .. } => filename.clone(),
-                    _ => format!("{}.md", resource.name),
-                };
-
-                let placed_name = util::prefixed_filename(
-                    resource.source_index,
-                    &resource.source_name,
-                    &filename,
-                );
-                let file_path = agents_dir.join(&placed_name);
-
-                if let ResourceContent::SingleFile { content, .. } = &resource.content {
-                    util::write_readonly(&file_path, content)?;
-
-                    let hash = store::sha256_hex(content);
-                    hashes.insert(format!("agents/{}", placed_name), hash);
-                }
-
-                let placed = format!(".codex/agents/{}", placed_name);
-                println!("    Agent '{}': {}", resource.name, placed);
-                placed_paths.push(placed);
             }
         }
 
@@ -104,4 +84,41 @@ impl AgentAdapter for CodexAdapter {
         }
         Ok(())
     }
+
+    fn always_loaded_kinds(&self) -> Vec<ResourceKind> {
+        vec![ResourceKind::Rule, ResourceKind::Agent]
+    }
+}
+
+/// Place an agent definition as an individual file in .codex/agents/
+fn place_agent_file(
+    agents_dir: &Path,
+    resource: &RawResource,
+    hashes: &mut HashMap<String, String>,
+    placed_paths: &mut Vec<String>,
+) -> Result<()> {
+    let filename = match &resource.content {
+        ResourceContent::SingleFile { filename, .. } => filename.clone(),
+        _ => format!("{}.md", resource.name),
+    };
+
+    let placed_name = util::prefixed_filename(
+        resource.source_index,
+        &resource.source_name,
+        &filename,
+    );
+    let file_path = agents_dir.join(&placed_name);
+
+    if let ResourceContent::SingleFile { content, .. } = &resource.content {
+        util::write_readonly(&file_path, content)?;
+
+        let hash = store::sha256_hex(content);
+        hashes.insert(format!("agents/{}", placed_name), hash);
+    }
+
+    let placed = format!(".codex/agents/{}", placed_name);
+    println!("    Agent '{}': {}", resource.name, placed);
+    placed_paths.push(placed);
+
+    Ok(())
 }

@@ -1,7 +1,8 @@
 use super::util;
 use super::{AgentAdapter, PlaceResult};
-use crate::resource::RawResource;
+use crate::resource::{RawResource, ResourceKind};
 use anyhow::Result;
+use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 
@@ -22,20 +23,46 @@ impl AgentAdapter for GooseAdapter {
 
     fn place(&self, workspace: &Path, resources: &[RawResource]) -> Result<PlaceResult> {
         let goose_dir = workspace.join(".goose");
-        fs::create_dir_all(&goose_dir)?;
+        let memories_dir = goose_dir.join("memories");
+        let skills_dir = goose_dir.join("skills");
+        fs::create_dir_all(&memories_dir)?;
+        fs::create_dir_all(&skills_dir)?;
 
-        let (content, hashes) =
-            util::build_concatenated_instructions(resources, crate::builtin::PALLET_SKILL);
+        // Place built-in pallet skill
+        util::place_builtin_skill(&skills_dir, ".goose")?;
 
-        let instructions_path = goose_dir.join("instructions.md");
-        util::write_readonly(&instructions_path, &content)?;
+        let mut hashes = HashMap::new();
+        let mut placed_paths = Vec::new();
 
-        let placed = ".goose/instructions.md".to_string();
-        println!("    Concatenated instructions: {}", placed);
+        for resource in resources {
+            match resource.kind {
+                ResourceKind::Rule | ResourceKind::Agent => {
+                    // Individual plain markdown files in .goose/memories/
+                    util::place_rule_as_plain_md(
+                        &memories_dir,
+                        resource,
+                        ".goose/memories",
+                        &mut hashes,
+                        &mut placed_paths,
+                    )?;
+                }
+                ResourceKind::Skill => {
+                    // Agent Skills directories in .goose/skills/
+                    util::place_skill_directory(
+                        &skills_dir,
+                        resource,
+                        ".goose",
+                        &mut hashes,
+                        &mut placed_paths,
+                    )?;
+                }
+                ResourceKind::Prompt | ResourceKind::Profile => {}
+            }
+        }
 
         Ok(PlaceResult {
             hashes,
-            placed_paths: vec![placed],
+            placed_paths,
         })
     }
 
@@ -44,5 +71,9 @@ impl AgentAdapter for GooseAdapter {
             util::remove_placed(workspace, rel_path)?;
         }
         Ok(())
+    }
+
+    fn always_loaded_kinds(&self) -> Vec<ResourceKind> {
+        vec![ResourceKind::Rule, ResourceKind::Agent]
     }
 }

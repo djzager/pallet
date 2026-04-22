@@ -4,9 +4,10 @@ A standardized platform for syncing and placing AI agent configuration — rules
 skills, profiles, and prompts — from organizational sources to developer
 workstations.
 
-Pallet fetches resources from sources (hub, git repos) and writes them directly
-to where each agent expects them (`.claude/`, `.cursor/`, `.goose/`, etc.) —
-read-only, auditable, and hierarchically governed.
+Pallet fetches resources from sources (hub, git repos, local directories) and
+places them where each agent expects them — `.claude/rules/`, `.cursor/rules/`,
+`.goose/memories/`, `.opencode/memories/`, `.codex/memories/` — read-only,
+auditable, and hierarchically governed.
 
 ## Demo
 
@@ -25,7 +26,7 @@ Requires [VHS](https://github.com/charmbracelet/vhs): `brew install vhs`
 
 ## The Problem
 
-AI coding agents (Claude Code, Cursor, Goose, OpenCode, Copilot) each have
+AI coding agents (Claude Code, Cursor, Goose, OpenCode, Codex) each have
 their own configuration format and location. Organizations that want consistent
 agent behavior across teams have no way to:
 
@@ -38,14 +39,15 @@ agent behavior across teams have no way to:
 ## How It Works
 
 ```
-Sources                     Agent Placement            Audit
-(where to fetch)            (where agents read)        (what was synced)
+Sources                     Agent Placement                   Audit
+(where to fetch)            (where agents read)               (what was synced)
 
-hub API ─────┐
-              ├──► merge ──► .claude/rules/     (direct write, 0444)
-git repos ───┘              .claude/skills/    (direct write, 0444)
-                            .claude/agents/    (direct write, 0444)
-                            pallet.lock        (project root)
+hub API ─────┐              .claude/rules/, skills/, agents/
+              ├──► merge ──► .cursor/rules/*.mdc, skills/     (direct write, 0444)
+git repos ───┤              .goose/memories/, skills/
+              │              .opencode/memories/, skills/
+local dirs ──┘              .codex/memories/, skills/, agents/
+                            pallet.lock                       (project root)
 ```
 
 ## Quick Start
@@ -58,11 +60,17 @@ pallet auth https://hub.example.com --user you --password pass
 pallet config add-source konveyor-skills --type git \
   --url https://github.com/konveyor/skills
 
-# Sync and place for detected agents
+# Sync and place for all detected agents
 pallet sync .
+
+# Preview what would be placed (no files written)
+pallet sync . --dry-run
 
 # Deterministic reproduction from lock file
 pallet sync . --locked
+
+# Re-sync from cache without pulling remotes
+pallet lock .
 ```
 
 ## Configuration
@@ -85,6 +93,11 @@ sources:
     url: https://github.com/team/skills
     paths:
       - skills/agent-readiness
+      # Annotated path with conditional loading
+      - path: rules/rust-conventions.md
+        kind: rule
+        globs: ["*.rs"]
+        description: "Rust coding conventions"
 
   - name: hub-profiles
     type: hub
@@ -125,9 +138,15 @@ Per-resource in frontmatter:
 
 Pallet uses three adapter layers, each independently extensible:
 
-- **Source adapters** — where to fetch (hub, git, local directory, OCI in future)
-- **Resource adapters** — what to handle (profiles, skills, rules, prompts, future types)
-- **Agent adapters** — where to place (Claude, Cursor, Goose, OpenCode, Copilot)
+- **Source adapters** — where to fetch (hub, git, local directory)
+- **Resource adapters** — what to handle (rules, skills, agents, profiles, prompts)
+- **Agent adapters** — where to place (Claude Code, Cursor, Goose, OpenCode, Codex)
+
+Each agent adapter translates pallet's canonical format into agent-native
+format. Skills use the [Agent Skills](https://agentskills.io) standard
+(`SKILL.md`) supported by 30+ agents. Rules are placed as individual files
+per agent — `.md` for Claude, `.mdc` for Cursor, plain markdown in
+`memories/` for Goose/OpenCode/Codex.
 
 See [docs/DESIGN.md](docs/DESIGN.md) for the full architecture.
 See [docs/USE_CASES.md](docs/USE_CASES.md) for detailed use case walkthroughs.

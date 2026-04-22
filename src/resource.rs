@@ -57,6 +57,10 @@ pub struct RawResource {
     pub governance: String,
     /// For skills: directory of files; for rules: single file content
     pub content: ResourceContent,
+    /// Glob patterns for conditional loading (e.g., ["*.rs", "src/**/*.rs"])
+    pub globs: Option<Vec<String>>,
+    /// Description for conditional loading (agent uses this to decide relevance)
+    pub description: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -94,6 +98,15 @@ pub struct Frontmatter {
     pub resource_type: Option<String>,
     #[serde(default = "default_governance")]
     pub governance: String,
+    /// Glob patterns for conditional loading
+    #[serde(default)]
+    pub globs: Option<Vec<String>>,
+    /// Claude-native `paths:` field (alias for globs)
+    #[serde(default)]
+    pub paths: Option<Vec<String>>,
+    /// Description for conditional loading
+    #[serde(default)]
+    pub description: Option<String>,
 }
 
 fn default_governance() -> String {

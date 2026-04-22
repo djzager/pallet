@@ -75,6 +75,7 @@ pub async fn fetch(source: &SourceConfig, source_index: usize, skip_pull: bool) 
                     .and_then(|n| kind_for_directory(&n.to_string_lossy()))
             });
             if full_path.exists() {
+                let before_len = resources.len();
                 discover_resources(
                     &full_path,
                     &cache_dir,
@@ -84,6 +85,19 @@ pub async fn fetch(source: &SourceConfig, source_index: usize, skip_pull: bool) 
                     kind_hint,
                     exclude,
                 )?;
+                // Apply PathEntry-level globs/description overrides to newly discovered resources
+                let entry_globs = path_entry.globs();
+                let entry_desc = path_entry.description();
+                if entry_globs.is_some() || entry_desc.is_some() {
+                    for r in &mut resources[before_len..] {
+                        if let Some(g) = entry_globs {
+                            r.globs = Some(g.clone());
+                        }
+                        if let Some(d) = entry_desc {
+                            r.description = Some(d.to_string());
+                        }
+                    }
+                }
             } else {
                 eprintln!(
                     "Warning: path '{}' not found in source '{}'",
@@ -291,6 +305,8 @@ pub fn read_skill_directory(
         source_index,
         governance,
         content: ResourceContent::Directory { files },
+        globs: None,
+        description: None,
     })
 }
 
@@ -372,6 +388,14 @@ pub fn try_parse_resource(
         .to_string_lossy()
         .to_string();
 
+    // Extract globs/description from frontmatter (paths: is Claude-native alias for globs:)
+    let globs = frontmatter
+        .as_ref()
+        .and_then(|fm| fm.globs.clone().or_else(|| fm.paths.clone()));
+    let description = frontmatter
+        .as_ref()
+        .and_then(|fm| fm.description.clone());
+
     Ok(Some(RawResource {
         name,
         kind,
@@ -382,6 +406,8 @@ pub fn try_parse_resource(
             filename,
             content: content.clone(),
         },
+        globs,
+        description,
     }))
 }
 

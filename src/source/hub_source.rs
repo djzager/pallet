@@ -87,6 +87,8 @@ pub async fn fetch(
             source_index,
             governance: "governed".to_string(),
             content: ResourceContent::ProfileBundle,
+            globs: None,
+            description: None,
         });
     }
 

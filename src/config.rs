@@ -52,6 +52,10 @@ pub enum PathEntry {
         path: String,
         #[serde(skip_serializing_if = "Option::is_none")]
         kind: Option<ResourceKind>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        globs: Option<Vec<String>>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        description: Option<String>,
     },
 }
 
@@ -67,6 +71,20 @@ impl PathEntry {
         match self {
             PathEntry::Simple(_) => None,
             PathEntry::Annotated { kind, .. } => kind.as_ref(),
+        }
+    }
+
+    pub fn globs(&self) -> Option<&Vec<String>> {
+        match self {
+            PathEntry::Simple(_) => None,
+            PathEntry::Annotated { globs, .. } => globs.as_ref(),
+        }
+    }
+
+    pub fn description(&self) -> Option<&str> {
+        match self {
+            PathEntry::Simple(_) => None,
+            PathEntry::Annotated { description, .. } => description.as_deref(),
         }
     }
 }

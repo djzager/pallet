@@ -25,7 +25,7 @@ mkdir -p "$WORKSPACE"
     cd "$WORKSPACE"
     git init -b main --quiet
     git remote add origin https://github.com/konveyor/pallet.git
-    mkdir -p .claude
+    mkdir -p .claude .cursor .goose
     echo "# Pallet" > README.md
     # Copy the real pallet.yaml from the project
     cp "$PALLET_ROOT/pallet.yaml" .

@@ -1,4 +1,4 @@
-use crate::resource::{RawResource, ResourceContent, ResourceKind};
+use crate::resource::{RawResource, ResourceContent};
 use crate::store;
 use anyhow::Result;
 use std::collections::HashMap;
@@ -83,126 +83,95 @@ pub fn prefixed_filename(source_index: usize, source_name: &str, filename: &str)
     format!("{:02}-{}-{}", source_index, source_name, filename)
 }
 
-/// Extract the primary markdown content from a resource, regardless of content type.
-/// For SingleFile, returns the content directly.
-/// For Directory (skills), finds the primary skill marker: SKILL.md > CLAUDE.md > AGENTS.md.
-pub fn extract_primary_content(resource: &RawResource) -> Option<&[u8]> {
-    match &resource.content {
-        ResourceContent::SingleFile { content, .. } => Some(content),
-        ResourceContent::Directory { files } => {
-            // Look for skill markers in priority order
-            for marker in crate::source::git_source::SKILL_MARKERS {
-                if let Some((_, content)) = files.iter().find(|(name, _)| name.eq_ignore_ascii_case(marker)) {
-                    return Some(content.as_slice());
-                }
-            }
-            // Fallback: any .md file
-            files.iter().find(|(name, _)| name.ends_with(".md"))
-                .map(|(_, content)| content.as_slice())
-        }
-        ResourceContent::ProfileBundle => None,
+
+/// Place a skill (Directory resource) into {skills_dir}/{name}/ as an Agent Skills directory.
+/// Reusable across all adapters that support the SKILL.md standard.
+/// `agent_prefix` is the agent-specific path prefix for display/tracking, e.g. ".claude", ".goose".
+pub fn place_skill_directory(
+    skills_dir: &Path,
+    resource: &RawResource,
+    agent_prefix: &str,
+    hashes: &mut HashMap<String, String>,
+    placed_paths: &mut Vec<String>,
+) -> Result<()> {
+    let skill_dir = skills_dir.join(&resource.name);
+
+    // Remove existing directory to ensure clean state
+    if skill_dir.exists() {
+        make_tree_writable(&skill_dir)?;
+        fs::remove_dir_all(&skill_dir)?;
     }
+    fs::create_dir_all(&skill_dir)?;
+
+    if let ResourceContent::Directory { files } = &resource.content {
+        for (relative_path, content) in files {
+            let file_path = skill_dir.join(relative_path);
+            if let Some(parent) = file_path.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            fs::write(&file_path, content)?;
+            set_readonly(&file_path)?;
+
+            let hash = store::sha256_hex(content);
+            hashes.insert(
+                format!("skills/{}/{}", resource.name, relative_path),
+                hash,
+            );
+        }
+    }
+
+    let placed = format!("{}/skills/{}", agent_prefix, resource.name);
+    println!("    Skill '{}': {}", resource.name, placed);
+    placed_paths.push(placed);
+
+    Ok(())
 }
 
-/// Build a concatenated instructions file from resources.
-/// Returns (file_content_bytes, per_resource_hashes).
-/// Used by agents that consume a single instructions file (Goose, OpenCode, Codex).
-pub fn build_concatenated_instructions(
-    resources: &[RawResource],
-    builtin_pallet_skill: &str,
-) -> (Vec<u8>, HashMap<String, String>) {
-    let mut sections: Vec<String> = Vec::new();
-    let mut hashes = HashMap::new();
+/// Place a single-file resource as a plain markdown file (frontmatter stripped).
+/// Used by agents without native frontmatter support (Goose, OpenCode, Codex).
+/// `target_dir` is the directory to write into, `dir_prefix` is for display/tracking.
+pub fn place_rule_as_plain_md(
+    target_dir: &Path,
+    resource: &RawResource,
+    dir_prefix: &str,
+    hashes: &mut HashMap<String, String>,
+    placed_paths: &mut Vec<String>,
+) -> Result<()> {
+    let filename = match &resource.content {
+        ResourceContent::SingleFile { filename, .. } => filename.clone(),
+        _ => format!("{}.md", resource.name),
+    };
 
-    sections.push("<!-- Managed by pallet. Do not edit. -->".to_string());
+    let placed_name = prefixed_filename(resource.source_index, &resource.source_name, &filename);
+    let file_path = target_dir.join(&placed_name);
 
-    // Group resources by kind
-    let mut rules = Vec::new();
-    let mut skills = Vec::new();
-    let mut agents = Vec::new();
+    if let ResourceContent::SingleFile { content, .. } = &resource.content {
+        let text = String::from_utf8_lossy(content);
+        let body = strip_frontmatter(&text);
+        let output = body.trim().as_bytes();
+        write_readonly(&file_path, output)?;
 
-    for resource in resources {
-        match resource.kind {
-            ResourceKind::Rule => rules.push(resource),
-            ResourceKind::Skill => skills.push(resource),
-            ResourceKind::Agent => agents.push(resource),
-            ResourceKind::Prompt | ResourceKind::Profile => {}
-        }
+        let hash = store::sha256_hex(output);
+        hashes.insert(format!("{}/{}", dir_prefix, placed_name), hash);
     }
 
-    // Built-in pallet skill
-    sections.push(format!(
-        "\n## pallet (built-in)\n\n{}",
-        builtin_pallet_skill.trim()
-    ));
+    let placed = format!("{}/{}", dir_prefix, placed_name);
+    println!("    {} '{}': {}", resource.kind, resource.name, placed);
+    placed_paths.push(placed);
 
-    // Rules section
-    if !rules.is_empty() {
-        sections.push("\n# Rules\n".to_string());
-        for resource in &rules {
-            if let Some(content) = extract_primary_content(resource) {
-                let text = String::from_utf8_lossy(content);
-                // Strip frontmatter for the concatenated output
-                let body = strip_frontmatter(&text);
-                sections.push(format!(
-                    "## {} (from {})\n\n{}",
-                    resource.name, resource.source_name, body.trim()
-                ));
-                let hash = store::sha256_hex(content);
-                hashes.insert(
-                    format!("rules/{}", resource.name),
-                    hash,
-                );
-            }
-        }
-    }
+    Ok(())
+}
 
-    // Skills section
-    if !skills.is_empty() {
-        sections.push("\n# Skills\n".to_string());
-        for resource in &skills {
-            if let Some(content) = extract_primary_content(resource) {
-                let text = String::from_utf8_lossy(content);
-                let body = strip_frontmatter(&text);
-                sections.push(format!(
-                    "## {} (from {})\n\n{}",
-                    resource.name, resource.source_name, body.trim()
-                ));
-                let hash = store::sha256_hex(content);
-                hashes.insert(
-                    format!("skills/{}", resource.name),
-                    hash,
-                );
-            }
-        }
-    }
-
-    // Agents section
-    if !agents.is_empty() {
-        sections.push("\n# Agents\n".to_string());
-        for resource in &agents {
-            if let Some(content) = extract_primary_content(resource) {
-                let text = String::from_utf8_lossy(content);
-                let body = strip_frontmatter(&text);
-                sections.push(format!(
-                    "## {} (from {})\n\n{}",
-                    resource.name, resource.source_name, body.trim()
-                ));
-                let hash = store::sha256_hex(content);
-                hashes.insert(
-                    format!("agents/{}", resource.name),
-                    hash,
-                );
-            }
-        }
-    }
-
-    let content = sections.join("\n\n");
-    (content.into_bytes(), hashes)
+/// Place a built-in pallet skill as a SKILL.md in {skills_dir}/pallet/SKILL.md
+pub fn place_builtin_skill(skills_dir: &Path, agent_prefix: &str) -> Result<()> {
+    let skill_path = skills_dir.join("pallet").join("SKILL.md");
+    write_readonly(&skill_path, crate::builtin::PALLET_SKILL.as_bytes())?;
+    println!("    Built-in skill 'pallet': {}/skills/pallet/SKILL.md", agent_prefix);
+    Ok(())
 }
 
 /// Strip YAML frontmatter (--- delimited) from markdown content
-fn strip_frontmatter(content: &str) -> &str {
+pub fn strip_frontmatter(content: &str) -> &str {
     let trimmed = content.trim_start();
     if !trimmed.starts_with("---") {
         return content;

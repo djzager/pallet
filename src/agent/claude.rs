@@ -26,12 +26,13 @@ impl AgentAdapter for ClaudeAdapter {
         let claude_dir = workspace.join(".claude");
 
         // Ensure placement directories exist
-        fs::create_dir_all(claude_dir.join("skills"))?;
+        let skills_dir = claude_dir.join("skills");
+        fs::create_dir_all(&skills_dir)?;
         fs::create_dir_all(claude_dir.join("rules"))?;
         fs::create_dir_all(claude_dir.join("agents"))?;
 
         // Place built-in pallet skill
-        place_builtin_skill(&claude_dir)?;
+        util::place_builtin_skill(&skills_dir, ".claude")?;
 
         let mut hashes = HashMap::new();
         let mut placed_paths = Vec::new();
@@ -39,7 +40,13 @@ impl AgentAdapter for ClaudeAdapter {
         for resource in resources {
             match resource.kind {
                 ResourceKind::Skill => {
-                    place_skill(&claude_dir, resource, &mut hashes, &mut placed_paths)?;
+                    util::place_skill_directory(
+                        &skills_dir,
+                        resource,
+                        ".claude",
+                        &mut hashes,
+                        &mut placed_paths,
+                    )?;
                 }
                 ResourceKind::Rule => {
                     place_single_file(
@@ -86,49 +93,17 @@ impl AgentAdapter for ClaudeAdapter {
         }
         Ok(())
     }
-}
 
-/// Write a skill directory directly to .claude/skills/{name}/
-fn place_skill(
-    claude_dir: &Path,
-    resource: &RawResource,
-    hashes: &mut HashMap<String, String>,
-    placed_paths: &mut Vec<String>,
-) -> Result<()> {
-    let skill_dir = claude_dir.join("skills").join(&resource.name);
-
-    // Remove existing directory to ensure clean state
-    if skill_dir.exists() {
-        util::make_tree_writable(&skill_dir)?;
-        fs::remove_dir_all(&skill_dir)?;
-    }
-    fs::create_dir_all(&skill_dir)?;
-
-    if let ResourceContent::Directory { files } = &resource.content {
-        for (relative_path, content) in files {
-            let file_path = skill_dir.join(relative_path);
-            if let Some(parent) = file_path.parent() {
-                fs::create_dir_all(parent)?;
-            }
-            fs::write(&file_path, content)?;
-            util::set_readonly(&file_path)?;
-
-            let hash = store::sha256_hex(content);
-            hashes.insert(
-                format!("skills/{}/{}", resource.name, relative_path),
-                hash,
-            );
+    fn is_always_loaded(&self, resource: &RawResource) -> bool {
+        if resource.globs.is_some() || resource.description.is_some() {
+            return false; // Conditional — Claude loads based on paths: frontmatter
         }
+        self.always_loaded_kinds().contains(&resource.kind)
     }
-
-    let placed = format!(".claude/skills/{}", resource.name);
-    println!("    Skill '{}': {}", resource.name, placed);
-    placed_paths.push(placed);
-
-    Ok(())
 }
 
 /// Write a single-file resource (rule or agent) directly to .claude/{subdir}/{NN}-{source}-{name}.md
+/// For rules with globs, translates to Claude-native `paths:` frontmatter.
 fn place_single_file(
     claude_dir: &Path,
     resource: &RawResource,
@@ -145,9 +120,25 @@ fn place_single_file(
     let file_path = claude_dir.join(claude_subdir).join(&placed_name);
 
     if let ResourceContent::SingleFile { content, .. } = &resource.content {
-        util::write_readonly(&file_path, content)?;
+        let output = if resource.globs.is_some() && resource.kind == ResourceKind::Rule {
+            // Translate globs to Claude-native paths: frontmatter
+            let text = String::from_utf8_lossy(content);
+            let body = util::strip_frontmatter(&text);
+            let globs = resource.globs.as_ref().unwrap();
+            let paths_yaml: Vec<String> = globs.iter().map(|g| format!("  - \"{}\"", g)).collect();
+            let new_content = format!(
+                "---\npaths:\n{}\n---\n\n{}",
+                paths_yaml.join("\n"),
+                body.trim()
+            );
+            new_content.into_bytes()
+        } else {
+            content.clone()
+        };
 
-        let hash = store::sha256_hex(content);
+        util::write_readonly(&file_path, &output)?;
+
+        let hash = store::sha256_hex(&output);
         hashes.insert(format!("{}/{}", claude_subdir, placed_name), hash);
     }
 
@@ -155,13 +146,5 @@ fn place_single_file(
     println!("    {} '{}': {}", resource.kind, resource.name, placed);
     placed_paths.push(placed);
 
-    Ok(())
-}
-
-/// Place the built-in pallet self-awareness skill
-fn place_builtin_skill(claude_dir: &Path) -> Result<()> {
-    let skill_path = claude_dir.join("skills").join("pallet").join("SKILL.md");
-    util::write_readonly(&skill_path, crate::builtin::PALLET_SKILL.as_bytes())?;
-    println!("    Built-in skill 'pallet': .claude/skills/pallet/SKILL.md");
     Ok(())
 }
