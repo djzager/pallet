@@ -2,10 +2,10 @@ use crate::agent::PlaceResult;
 use crate::config::SourceConfig;
 use crate::resource::RawResource;
 use anyhow::{Context, Result};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
-use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct LockFile {
@@ -119,10 +119,13 @@ pub fn save_lock(workspace: &Path, lock: &LockFile) -> Result<()> {
 /// Read lock file from pallet.lock in the workspace root
 pub fn load_lock(workspace: &Path) -> Result<LockFile> {
     let lock_path = workspace.join("pallet.lock");
-    let content = fs::read_to_string(&lock_path)
-        .with_context(|| format!("No lock file found at {}. Run `pallet sync` first.", lock_path.display()))?;
-    let lock: LockFile =
-        serde_yaml::from_str(&content).context("Failed to parse pallet.lock")?;
+    let content = fs::read_to_string(&lock_path).with_context(|| {
+        format!(
+            "No lock file found at {}. Run `pallet sync` first.",
+            lock_path.display()
+        )
+    })?;
+    let lock: LockFile = serde_yaml::from_str(&content).context("Failed to parse pallet.lock")?;
     Ok(lock)
 }
 
@@ -181,9 +184,6 @@ mod tests {
         assert_eq!(parsed.resources[0].name, "test-rule");
         let claude_paths = parsed.resources[0].placed.get("claude").unwrap();
         assert_eq!(claude_paths.len(), 1);
-        assert_eq!(
-            claude_paths[0],
-            ".claude/rules/00-test-source-test-rule.md"
-        );
+        assert_eq!(claude_paths[0], ".claude/rules/00-test-source-test-rule.md");
     }
 }

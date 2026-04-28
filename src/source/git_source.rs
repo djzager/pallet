@@ -7,11 +7,12 @@ use std::path::Path;
 use std::process::Command;
 
 /// Fetch resources from a git source
-pub async fn fetch(source: &SourceConfig, source_index: usize, skip_pull: bool) -> Result<FetchResult> {
-    let url = source
-        .url
-        .as_ref()
-        .context("Git source missing 'url'")?;
+pub async fn fetch(
+    source: &SourceConfig,
+    source_index: usize,
+    skip_pull: bool,
+) -> Result<FetchResult> {
+    let url = source.url.as_ref().context("Git source missing 'url'")?;
     let git_ref = source.git_ref.as_deref().unwrap_or("main");
 
     // Clone or update cache
@@ -56,9 +57,7 @@ pub async fn fetch(source: &SourceConfig, source_index: usize, skip_pull: bool) 
                     "  Warning: source '{}' has a root {} (designed as a single skill),",
                     source.name, marker
                 );
-                eprintln!(
-                    "    but 'paths' config selects subdirectories which bypasses it."
-                );
+                eprintln!("    but 'paths' config selects subdirectories which bypasses it.");
                 eprintln!(
                     "    Consider removing 'paths' to sync the repo as a single on-demand skill."
                 );
@@ -182,7 +181,10 @@ pub fn has_skill_marker(path: &Path) -> bool {
 /// Find the primary skill marker file in a directory, resolving symlinks to avoid duplicates.
 /// Returns the marker filename (e.g. "SKILL.md") or None.
 pub fn find_primary_skill_marker(path: &Path) -> Option<&'static str> {
-    SKILL_MARKERS.iter().copied().find(|m| path.join(m).exists())
+    SKILL_MARKERS
+        .iter()
+        .copied()
+        .find(|m| path.join(m).exists())
 }
 
 /// Infer a resource kind hint from a well-known directory name
@@ -248,7 +250,9 @@ pub fn discover_resources(
             // Determine kind hint for this subdirectory:
             // 1. Propagate parent's kind_hint if set
             // 2. Otherwise check if the directory name is a well-known convention
-            let child_hint = kind_hint.clone().or_else(|| kind_for_directory(&entry_name));
+            let child_hint = kind_hint
+                .clone()
+                .or_else(|| kind_for_directory(&entry_name));
 
             discover_resources(
                 &entry_path,
@@ -261,9 +265,9 @@ pub fn discover_resources(
             )?;
         } else if entry_path.is_file()
             && entry_path.extension().is_some_and(|e| e == "md")
-            && entry_path
-                .file_name()
-                .is_some_and(|n| n != "SKILL.md" && n != "CLAUDE.md" && n != "AGENTS.md" && n != "README.md")
+            && entry_path.file_name().is_some_and(|n| {
+                n != "SKILL.md" && n != "CLAUDE.md" && n != "AGENTS.md" && n != "README.md"
+            })
         {
             if let Some(resource) =
                 try_parse_resource(&entry_path, source_name, source_index, kind_hint.as_ref())?
@@ -392,9 +396,7 @@ pub fn try_parse_resource(
     let globs = frontmatter
         .as_ref()
         .and_then(|fm| fm.globs.clone().or_else(|| fm.paths.clone()));
-    let description = frontmatter
-        .as_ref()
-        .and_then(|fm| fm.description.clone());
+    let description = frontmatter.as_ref().and_then(|fm| fm.description.clone());
 
     Ok(Some(RawResource {
         name,
@@ -410,4 +412,3 @@ pub fn try_parse_resource(
         description,
     }))
 }
-

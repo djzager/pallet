@@ -10,7 +10,7 @@ mod source;
 mod store;
 mod sync;
 
-use anyhow::{Result, bail};
+use anyhow::{bail, Result};
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
@@ -103,7 +103,12 @@ async fn main() -> Result<()> {
         } => {
             cmd_auth(&hub_url, &user, &password).await?;
         }
-        Commands::Sync { path, locked, dry_run, force } => {
+        Commands::Sync {
+            path,
+            locked,
+            dry_run,
+            force,
+        } => {
             let workspace = path.unwrap_or_else(|| PathBuf::from("."));
             let workspace = workspace.canonicalize()?;
             cmd_sync(&workspace, locked, false, dry_run, force).await?;
@@ -127,13 +132,21 @@ async fn main() -> Result<()> {
                     paths,
                     exclude,
                 } => {
-                    cmd_config_add_source(&workspace, name, source_type, url, git_ref, paths, exclude)?;
+                    cmd_config_add_source(
+                        &workspace,
+                        name,
+                        source_type,
+                        url,
+                        git_ref,
+                        paths,
+                        exclude,
+                    )?;
                 }
                 ConfigAction::RemoveSource { name } => {
                     cmd_config_remove_source(&workspace, name)?;
                 }
             }
-        },
+        }
     }
 
     Ok(())
@@ -169,9 +182,7 @@ async fn cmd_auth(hub_url: &str, user: &str, password: &str) -> Result<()> {
             config::SourceConfig {
                 name: "engineering-toolkit".to_string(),
                 source_type: config::SourceType::Git,
-                url: Some(
-                    "https://github.com/gwenneg/claude-engineering-toolkit".to_string(),
-                ),
+                url: Some("https://github.com/gwenneg/claude-engineering-toolkit".to_string()),
                 git_ref: Some("main".to_string()),
                 paths: Some(vec![config::PathEntry::Simple(
                     "skills/agent-readiness".to_string(),
@@ -198,11 +209,7 @@ async fn cmd_auth(hub_url: &str, user: &str, password: &str) -> Result<()> {
     for s in &cfg.sources {
         match s.source_type {
             config::SourceType::Git => {
-                println!(
-                    "  - {} (git: {})",
-                    s.name,
-                    s.url.as_deref().unwrap_or("?")
-                );
+                println!("  - {} (git: {})", s.name, s.url.as_deref().unwrap_or("?"));
                 if let Some(paths) = &s.paths {
                     for p in paths {
                         println!("    path: {}", p.path());
@@ -226,7 +233,13 @@ async fn cmd_auth(hub_url: &str, user: &str, password: &str) -> Result<()> {
     Ok(())
 }
 
-async fn cmd_sync(workspace: &std::path::Path, locked: bool, offline: bool, dry_run: bool, force: bool) -> Result<()> {
+async fn cmd_sync(
+    workspace: &std::path::Path,
+    locked: bool,
+    offline: bool,
+    dry_run: bool,
+    force: bool,
+) -> Result<()> {
     sync::run_sync(workspace, locked, offline, dry_run, force).await
 }
 
@@ -246,10 +259,7 @@ fn cmd_config_show(workspace: &std::path::Path) -> Result<()> {
             i,
             s.name,
             s.source_type_str(),
-            s.url
-                .as_ref()
-                .map(|u| format!(": {u}"))
-                .unwrap_or_default()
+            s.url.as_ref().map(|u| format!(": {u}")).unwrap_or_default()
         );
     }
     Ok(())
@@ -282,7 +292,10 @@ fn cmd_config_add_source(
         "git" => config::SourceType::Git,
         "hub" => config::SourceType::Hub,
         "local" => config::SourceType::Local,
-        _ => bail!("Unknown source type '{}'. Must be 'git', 'hub', or 'local'.", type_str),
+        _ => bail!(
+            "Unknown source type '{}'. Must be 'git', 'hub', or 'local'.",
+            type_str
+        ),
     };
 
     if source_type == config::SourceType::Git && url.is_none() {
@@ -301,7 +314,10 @@ fn cmd_config_add_source(
     });
 
     config::save_config(workspace, &cfg)?;
-    println!("Source '{}' added. Run `pallet sync .` to fetch resources.", name);
+    println!(
+        "Source '{}' added. Run `pallet sync .` to fetch resources.",
+        name
+    );
     Ok(())
 }
 

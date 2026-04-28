@@ -40,10 +40,7 @@ pub async fn fetch(
 
     let app = match matched {
         Some(app) => {
-            println!(
-                "  Matched hub application: {} (id: {})",
-                app.name, app.id
-            );
+            println!("  Matched hub application: {} (id: {})", app.name, app.id);
             app
         }
         None => {
@@ -74,10 +71,7 @@ pub async fn fetch(
     let mut resolved_ref_parts = Vec::new();
 
     for profile in &profiles {
-        println!(
-            "  Found profile: {} (id: {})",
-            profile.name, profile.id
-        );
+        println!("  Found profile: {} (id: {})", profile.name, profile.id);
 
         resolved_ref_parts.push(format!("profile:{}:v{}", profile.id, profile.id));
         resources.push(RawResource {
@@ -168,4 +162,3 @@ fn match_application(
     // Fall back to first match
     Some(candidates.remove(0).clone())
 }
-

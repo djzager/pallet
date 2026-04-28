@@ -9,7 +9,13 @@ enum ReportMode {
 }
 
 /// Run the full sync pipeline: fetch -> merge -> cleanup -> place -> lock
-pub async fn run_sync(workspace: &Path, locked: bool, offline: bool, dry_run: bool, force: bool) -> Result<()> {
+pub async fn run_sync(
+    workspace: &Path,
+    locked: bool,
+    offline: bool,
+    dry_run: bool,
+    force: bool,
+) -> Result<()> {
     // 1. Load config from workspace/pallet.yaml
     let cfg = config::load_config(workspace).context(
         "Failed to load pallet.yaml. Create one with `pallet auth` or `pallet config add-source`.",
@@ -19,7 +25,11 @@ pub async fn run_sync(workspace: &Path, locked: bool, offline: bool, dry_run: bo
 
     // Load hub credentials if needed
     let hub_url = cfg.hub.as_ref().map(|h| h.url.clone());
-    let hub_token = if cfg.sources.iter().any(|s| s.source_type == config::SourceType::Hub) {
+    let hub_token = if cfg
+        .sources
+        .iter()
+        .any(|s| s.source_type == config::SourceType::Hub)
+    {
         let creds = config::load_credentials()
             .context("Hub source configured but no credentials found. Run `pallet auth` first.")?;
         creds.hub_token
@@ -69,10 +79,7 @@ pub async fn run_sync(workspace: &Path, locked: bool, offline: bool, dry_run: bo
     for source_cfg in cfg.sources.iter() {
         // In offline mode, skip hub sources (no local cache)
         if offline && source_cfg.source_type == config::SourceType::Hub {
-            println!(
-                "\nSkipping source: {} (hub, offline mode)",
-                source_cfg.name
-            );
+            println!("\nSkipping source: {} (hub, offline mode)", source_cfg.name);
             fetch_results.push((source_cfg, None));
             continue;
         }
@@ -95,7 +102,10 @@ pub async fn run_sync(workspace: &Path, locked: bool, offline: bool, dry_run: bo
         match source::fetch_source(
             source_cfg,
             workspace,
-            cfg.sources.iter().position(|s| s.name == source_cfg.name).unwrap_or(0),
+            cfg.sources
+                .iter()
+                .position(|s| s.name == source_cfg.name)
+                .unwrap_or(0),
             hub_url.as_deref(),
             hub_token.as_deref(),
             offline,
@@ -122,10 +132,7 @@ pub async fn run_sync(workspace: &Path, locked: bool, offline: bool, dry_run: bo
                         source_cfg.name
                     );
                 }
-                eprintln!(
-                    "  Warning: Failed to fetch from '{}': {e}",
-                    source_cfg.name
-                );
+                eprintln!("  Warning: Failed to fetch from '{}': {e}", source_cfg.name);
                 fetch_results.push((source_cfg, None));
             }
         }
@@ -196,9 +203,7 @@ pub async fn run_sync(workspace: &Path, locked: bool, offline: bool, dry_run: bo
         );
     }
     if budget_exceeded && force {
-        eprintln!(
-            "\n  Warning: context budget exceeded, continuing due to --force"
-        );
+        eprintln!("\n  Warning: context budget exceeded, continuing due to --force");
     }
 
     if dry_run {
@@ -279,12 +284,7 @@ pub async fn run_sync(workspace: &Path, locked: bool, offline: bool, dry_run: bo
     if lock_file.is_none() {
         let config_content = std::fs::read_to_string(config::config_path(workspace))?;
         let config_hash = store::sha256_hex(config_content.as_bytes());
-        let lock = lock::build_lock(
-            &fetch_results,
-            &all_resources,
-            &agent_results,
-            &config_hash,
-        );
+        let lock = lock::build_lock(&fetch_results, &all_resources, &agent_results, &config_hash);
         lock::save_lock(workspace, &lock)?;
         println!("  Lock file written to pallet.lock");
     }
@@ -376,7 +376,9 @@ fn print_context_report(
         for (source, (count, bytes)) in &by_source {
             println!(
                 "      {}: {} resource(s), ~{}KB",
-                source, count, bytes / 1024
+                source,
+                count,
+                bytes / 1024
             );
         }
 
@@ -388,11 +390,7 @@ fn print_context_report(
             );
         }
 
-        println!(
-            "    Budget: ~{}KB (~{} tokens)",
-            budget / 1024,
-            budget / 4,
-        );
+        println!("    Budget: ~{}KB (~{} tokens)", budget / 1024, budget / 4,);
     }
     println!();
 }

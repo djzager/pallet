@@ -116,7 +116,8 @@ fn place_single_file(
         _ => format!("{}.md", resource.name),
     };
 
-    let placed_name = util::prefixed_filename(resource.source_index, &resource.source_name, &filename);
+    let placed_name =
+        util::prefixed_filename(resource.source_index, &resource.source_name, &filename);
     let file_path = claude_dir.join(claude_subdir).join(&placed_name);
 
     if let ResourceContent::SingleFile { content, .. } = &resource.content {

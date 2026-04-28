@@ -83,7 +83,6 @@ pub fn prefixed_filename(source_index: usize, source_name: &str, filename: &str)
     format!("{:02}-{}-{}", source_index, source_name, filename)
 }
 
-
 /// Place a skill (Directory resource) into {skills_dir}/{name}/ as an Agent Skills directory.
 /// Reusable across all adapters that support the SKILL.md standard.
 /// `agent_prefix` is the agent-specific path prefix for display/tracking, e.g. ".claude", ".goose".
@@ -113,10 +112,7 @@ pub fn place_skill_directory(
             set_readonly(&file_path)?;
 
             let hash = store::sha256_hex(content);
-            hashes.insert(
-                format!("skills/{}/{}", resource.name, relative_path),
-                hash,
-            );
+            hashes.insert(format!("skills/{}/{}", resource.name, relative_path), hash);
         }
     }
 
@@ -166,7 +162,10 @@ pub fn place_rule_as_plain_md(
 pub fn place_builtin_skill(skills_dir: &Path, agent_prefix: &str) -> Result<()> {
     let skill_path = skills_dir.join("pallet").join("SKILL.md");
     write_readonly(&skill_path, crate::builtin::PALLET_SKILL.as_bytes())?;
-    println!("    Built-in skill 'pallet': {}/skills/pallet/SKILL.md", agent_prefix);
+    println!(
+        "    Built-in skill 'pallet': {}/skills/pallet/SKILL.md",
+        agent_prefix
+    );
     Ok(())
 }
 

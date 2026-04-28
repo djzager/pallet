@@ -66,10 +66,7 @@ pub struct RawResource {
 #[derive(Debug, Clone)]
 pub enum ResourceContent {
     /// A single file (rules, agent prompts, profile yaml)
-    SingleFile {
-        filename: String,
-        content: Vec<u8>,
-    },
+    SingleFile { filename: String, content: Vec<u8> },
     /// A directory of files (skills with SKILL.md and supporting files)
     Directory {
         files: Vec<(String, Vec<u8>)>, // (relative_path, content)
@@ -127,4 +124,3 @@ pub fn parse_frontmatter(content: &str) -> Option<Frontmatter> {
 
     serde_yaml::from_str(yaml).ok()
 }
-

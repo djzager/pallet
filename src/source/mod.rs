@@ -24,9 +24,7 @@ pub async fn fetch_source(
     skip_pull: bool,
 ) -> Result<FetchResult> {
     match source.source_type {
-        crate::config::SourceType::Git => {
-            git_source::fetch(source, source_index, skip_pull).await
-        }
+        crate::config::SourceType::Git => git_source::fetch(source, source_index, skip_pull).await,
         crate::config::SourceType::Hub => {
             let url = hub_url.ok_or_else(|| anyhow::anyhow!("Hub URL not configured"))?;
             let token = hub_token.ok_or_else(|| {

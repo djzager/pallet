@@ -1,4 +1,4 @@
-use anyhow::{Context, Result, bail};
+use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 
 /// Login response from POST /hub/auth/login
@@ -83,7 +83,10 @@ impl HubClient {
             );
         }
 
-        let login: LoginResponse = resp.json().await.context("Failed to parse login response")?;
+        let login: LoginResponse = resp
+            .json()
+            .await
+            .context("Failed to parse login response")?;
         self.token = Some(login.token.clone());
         Ok(login)
     }
@@ -148,5 +151,4 @@ impl HubClient {
         let profiles: Vec<Profile> = resp.json().await.context("Failed to parse profiles")?;
         Ok(profiles)
     }
-
 }

@@ -38,12 +38,7 @@ impl AgentAdapter for CursorAdapter {
         for resource in resources {
             match resource.kind {
                 ResourceKind::Rule | ResourceKind::Agent => {
-                    place_mdc_file(
-                        &rules_dir,
-                        resource,
-                        &mut hashes,
-                        &mut placed_paths,
-                    )?;
+                    place_mdc_file(&rules_dir, resource, &mut hashes, &mut placed_paths)?;
                 }
                 ResourceKind::Skill => {
                     // Agent Skills directories in .cursor/skills/
@@ -119,10 +114,7 @@ fn place_mdc_file(
                 globs_yaml.join("\n")
             )
         } else if let Some(ref desc) = resource.description {
-            format!(
-                "---\nalwaysApply: false\ndescription: \"{}\"\n---",
-                desc
-            )
+            format!("---\nalwaysApply: false\ndescription: \"{}\"\n---", desc)
         } else {
             "---\nalwaysApply: true\n---".to_string()
         };

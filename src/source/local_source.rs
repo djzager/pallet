@@ -6,7 +6,13 @@ use std::path::Path;
 
 /// Default directories to exclude when scanning the workspace root
 const DEFAULT_EXCLUDE: &[&str] = &[
-    ".claude", ".cursor", ".goose", ".git", "target", "node_modules", ".pallet",
+    ".claude",
+    ".cursor",
+    ".goose",
+    ".git",
+    "target",
+    "node_modules",
+    ".pallet",
 ];
 
 /// Fetch resources from a local source (project-level directories)

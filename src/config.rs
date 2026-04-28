@@ -123,8 +123,7 @@ pub fn load_config(workspace: &Path) -> Result<Config> {
     let path = config_path(workspace);
     let content = fs::read_to_string(&path)
         .with_context(|| format!("Failed to read config at {}", path.display()))?;
-    let config: Config =
-        serde_yaml::from_str(&content).context("Failed to parse pallet.yaml")?;
+    let config: Config = serde_yaml::from_str(&content).context("Failed to parse pallet.yaml")?;
     Ok(config)
 }
 
@@ -155,8 +154,12 @@ fn credentials_path() -> Result<PathBuf> {
 
 pub fn load_credentials() -> Result<Credentials> {
     let path = credentials_path()?;
-    let content = fs::read_to_string(&path)
-        .with_context(|| format!("No credentials found at {}. Run `pallet auth` first.", path.display()))?;
+    let content = fs::read_to_string(&path).with_context(|| {
+        format!(
+            "No credentials found at {}. Run `pallet auth` first.",
+            path.display()
+        )
+    })?;
     let creds: Credentials =
         serde_yaml::from_str(&content).context("Failed to parse credentials.yaml")?;
     Ok(creds)

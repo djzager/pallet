@@ -94,8 +94,20 @@ mod tests {
     #[test]
     fn test_federated_override() {
         let resources = vec![
-            make_resource("coding-standards", ResourceKind::Rule, "org", 0, "federated"),
-            make_resource("coding-standards", ResourceKind::Rule, "team", 1, "federated"),
+            make_resource(
+                "coding-standards",
+                ResourceKind::Rule,
+                "org",
+                0,
+                "federated",
+            ),
+            make_resource(
+                "coding-standards",
+                ResourceKind::Rule,
+                "team",
+                1,
+                "federated",
+            ),
         ];
         let result = merge_resources(resources);
         assert_eq!(result.resources.len(), 1);

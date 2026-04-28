@@ -51,12 +51,7 @@ impl AgentAdapter for CodexAdapter {
                 }
                 ResourceKind::Agent => {
                     // Agent definitions as individual files in .codex/agents/
-                    place_agent_file(
-                        &agents_dir,
-                        resource,
-                        &mut hashes,
-                        &mut placed_paths,
-                    )?;
+                    place_agent_file(&agents_dir, resource, &mut hashes, &mut placed_paths)?;
                 }
                 ResourceKind::Skill => {
                     // Agent Skills directories in .codex/skills/
@@ -102,11 +97,8 @@ fn place_agent_file(
         _ => format!("{}.md", resource.name),
     };
 
-    let placed_name = util::prefixed_filename(
-        resource.source_index,
-        &resource.source_name,
-        &filename,
-    );
+    let placed_name =
+        util::prefixed_filename(resource.source_index, &resource.source_name, &filename);
     let file_path = agents_dir.join(&placed_name);
 
     if let ResourceContent::SingleFile { content, .. } = &resource.content {
