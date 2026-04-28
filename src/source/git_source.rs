@@ -206,7 +206,7 @@ pub fn is_excluded(name: &str, exclude: &[String]) -> bool {
 /// Recursively discover resources under a path
 pub fn discover_resources(
     path: &Path,
-    repo_root: &Path,
+    _repo_root: &Path,
     source_name: &str,
     source_index: usize,
     resources: &mut Vec<RawResource>,
@@ -256,7 +256,7 @@ pub fn discover_resources(
 
             discover_resources(
                 &entry_path,
-                repo_root,
+                _repo_root,
                 source_name,
                 source_index,
                 resources,

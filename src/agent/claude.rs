@@ -121,11 +121,12 @@ fn place_single_file(
     let file_path = claude_dir.join(claude_subdir).join(&placed_name);
 
     if let ResourceContent::SingleFile { content, .. } = &resource.content {
-        let output = if resource.globs.is_some() && resource.kind == ResourceKind::Rule {
+        let output = if let (Some(globs), ResourceKind::Rule) =
+            (&resource.globs, &resource.kind)
+        {
             // Translate globs to Claude-native paths: frontmatter
             let text = String::from_utf8_lossy(content);
             let body = util::strip_frontmatter(&text);
-            let globs = resource.globs.as_ref().unwrap();
             let paths_yaml: Vec<String> = globs.iter().map(|g| format!("  - \"{}\"", g)).collect();
             let new_content = format!(
                 "---\npaths:\n{}\n---\n\n{}",
